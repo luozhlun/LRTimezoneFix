@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,7 @@ func TestGUIAppScanIntegration(t *testing.T) {
 		t.Skip("set LRTIMEZONEFIX_GUI_TEST_ROOT to run the ExifTool GUI integration test")
 	}
 	app := newGUIApp()
+	defer app.shutdown(context.Background())
 	report, err := app.Scan(GUISelection{Mode: "folder", Root: root})
 	if err != nil {
 		t.Fatal(err)
@@ -78,5 +80,22 @@ func TestGUIAppScanIntegration(t *testing.T) {
 	}
 	if got := report.Files[0].TargetOffset; got != "+09:00" {
 		t.Fatalf("target offset=%s", got)
+	}
+}
+
+func TestGetThumbnailIntegration(t *testing.T) {
+	file := os.Getenv("LRTIMEZONEFIX_THUMBNAIL_TEST_FILE")
+	if file == "" {
+		t.Skip("set LRTIMEZONEFIX_THUMBNAIL_TEST_FILE to run the embedded thumbnail integration test")
+	}
+	app := newGUIApp()
+	defer app.shutdown(context.Background())
+	app.sessions["thumbnail-test"] = &guiSession{Results: []analysisResult{{File: file}}}
+	thumbnail, err := app.GetThumbnail("thumbnail-test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(thumbnail, "data:image/jpeg;base64,") {
+		t.Fatalf("unexpected embedded thumbnail: %.40q", thumbnail)
 	}
 }

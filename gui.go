@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,11 +28,13 @@ var frontendAssets embed.FS
 const progressEvent = "lrtimezonefix:progress"
 
 type GUIApp struct {
-	ctx        context.Context
-	mu         sync.Mutex
-	busy       bool
-	scanCancel context.CancelFunc
-	sessions   map[string]*guiSession
+	ctx              context.Context
+	mu               sync.Mutex
+	busy             bool
+	scanCancel       context.CancelFunc
+	sessions         map[string]*guiSession
+	thumbnailMu      sync.Mutex
+	thumbnailSession *exifToolSession
 }
 
 type guiSession struct {
@@ -130,6 +135,7 @@ func runGUI() error {
 		BackgroundColour:         &wailsoptions.RGBA{R: 242, G: 246, B: 250, A: 255},
 		AssetServer:              &assetserver.Options{Assets: frontendAssets},
 		OnStartup:                app.startup,
+		OnShutdown:               app.shutdown,
 		Bind:                     []interface{}{app},
 		CSSDragProperty:          "--wails-draggable",
 		CSSDragValue:             "drag",
@@ -154,6 +160,86 @@ func (a *GUIApp) GetAppInfo() AppInfo {
 	info.ExifToolReady = true
 	info.ExifToolPath = path
 	return info
+}
+
+func (a *GUIApp) shutdown(context.Context) {
+	a.thumbnailMu.Lock()
+	session := a.thumbnailSession
+	a.thumbnailSession = nil
+	a.thumbnailMu.Unlock()
+	if session != nil {
+		_ = session.Close()
+	}
+}
+
+func (a *GUIApp) GetThumbnail(sessionID string, index int) (string, error) {
+	file, err := a.sessionFile(sessionID, index)
+	if err != nil {
+		return "", err
+	}
+	exifTool, err := findExifTool()
+	if err != nil {
+		return "", err
+	}
+	session, err := a.getThumbnailSession(exifTool)
+	if err != nil {
+		return "", err
+	}
+	stdout, stderr, err := session.RunFiles(filepath.Dir(file), []string{filepath.Base(file)}, "-j", "-b", "-ThumbnailImage")
+	if err != nil {
+		return "", fmt.Errorf("读取 EXIF 缩略图失败：%v；%s", err, strings.TrimSpace(stderr))
+	}
+	var rows []struct {
+		ThumbnailImage string `json:"ThumbnailImage"`
+	}
+	if err := json.Unmarshal(stdout, &rows); err != nil || len(rows) == 0 || rows[0].ThumbnailImage == "" {
+		return "", nil
+	}
+	encoded := strings.TrimPrefix(rows[0].ThumbnailImage, "base64:")
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(raw) < 4 || len(raw) > 4<<20 || raw[0] != 0xff || raw[1] != 0xd8 {
+		return "", nil
+	}
+	return "data:image/jpeg;base64," + encoded, nil
+}
+
+func (a *GUIApp) RevealFile(sessionID string, index int) error {
+	file, err := a.sessionFile(sessionID, index)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(file); err != nil {
+		return fmt.Errorf("照片不存在或无法访问：%w", err)
+	}
+	cmd := exec.Command("explorer.exe", "/select,"+file)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("无法打开资源管理器：%w", err)
+	}
+	return cmd.Process.Release()
+}
+
+func (a *GUIApp) sessionFile(sessionID string, index int) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session, ok := a.sessions[sessionID]
+	if !ok || index < 0 || index >= len(session.Results) {
+		return "", errors.New("扫描结果已经过期，请重新扫描")
+	}
+	return session.Results[index].File, nil
+}
+
+func (a *GUIApp) getThumbnailSession(exifTool string) (*exifToolSession, error) {
+	a.thumbnailMu.Lock()
+	defer a.thumbnailMu.Unlock()
+	if a.thumbnailSession != nil {
+		return a.thumbnailSession, nil
+	}
+	session, err := newExifToolSession(exifTool)
+	if err != nil {
+		return nil, err
+	}
+	a.thumbnailSession = session
+	return session, nil
 }
 
 func (a *GUIApp) ChooseFolder() (GUISelection, error) {

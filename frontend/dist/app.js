@@ -8,7 +8,10 @@ const state = {
   cancelRequested: false,
   filter: 'all',
   search: '',
+  thumbnailCache: new Map(),
 };
+
+let thumbnailObserver;
 
 const el = (id) => document.getElementById(id);
 const escapeHTML = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({
@@ -74,6 +77,7 @@ async function choose(mode) {
     state.selection = selection;
     state.report = null;
     state.selected.clear();
+    state.thumbnailCache.clear();
     el('selectionPanel').classList.remove('empty');
     el('selectionTitle').textContent = selection.mode === 'folder' ? '递归扫描文件夹' : selection.label;
     el('selectionPath').textContent = selection.mode === 'folder' ? selection.root : selection.files.join('  ·  ');
@@ -192,7 +196,9 @@ function renderRows() {
     const offset = file.repairable ? `<span class="mono">${escapeHTML(oldOffset)}</span><span class="offset-arrow">→</span><span class="mono">${escapeHTML(file.targetOffset)}</span>` : `<span class="mono">${escapeHTML(oldOffset)}</span>`;
     return `<tr data-index="${file.index}">
       <td class="check-col">${checkbox}</td>
+      <td class="thumb-col"><div class="photo-thumb"><span>JPG</span><img class="thumb-image" data-index="${file.index}" alt="" decoding="async"></div></td>
       <td class="file-cell"><div class="file-name" title="${escapeHTML(file.displayName)}">${escapeHTML(file.displayName)}</div><div class="file-path">${escapeHTML(file.reason || file.path)}</div></td>
+      <td class="reveal-col"><button class="reveal-button" type="button" data-index="${file.index}" title="在资源管理器中显示" aria-label="在资源管理器中显示 ${escapeHTML(file.displayName)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2Z"/><path d="M2 10h20"/></svg></button></td>
       <td class="mono">${escapeHTML(time)}</td>
       <td>${offset}</td>
       <td class="mono">${escapeHTML(target)}</td>
@@ -207,7 +213,59 @@ function renderRows() {
     event.target.checked ? state.selected.add(index) : state.selected.delete(index);
     updateSelectedCount();
   }));
+  el('resultsBody').querySelectorAll('.reveal-button').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    revealFile(Number(button.dataset.index));
+  }));
+  observeThumbnails();
   updateSelectAllState(files);
+}
+
+function observeThumbnails() {
+  thumbnailObserver?.disconnect();
+  const images = [...el('resultsBody').querySelectorAll('.thumb-image')];
+  if (!('IntersectionObserver' in window)) {
+    images.slice(0, 30).forEach(loadThumbnail);
+    return;
+  }
+  thumbnailObserver = new IntersectionObserver((entries) => {
+    entries.filter((entry) => entry.isIntersecting).forEach((entry) => {
+      thumbnailObserver.unobserve(entry.target);
+      loadThumbnail(entry.target);
+    });
+  }, {root: el('tableWrap'), rootMargin: '160px 0px'});
+  images.forEach((image) => thumbnailObserver.observe(image));
+}
+
+async function loadThumbnail(image) {
+  if (!state.report || image.dataset.loading) return;
+  const sessionId = state.report.sessionId;
+  const index = Number(image.dataset.index);
+  const key = `${sessionId}:${index}`;
+  image.dataset.loading = 'true';
+  try {
+    let data = state.thumbnailCache.get(key);
+    if (data === undefined) {
+      data = await api().GetThumbnail(sessionId, index);
+      if (state.thumbnailCache.size >= 300) state.thumbnailCache.delete(state.thumbnailCache.keys().next().value);
+      state.thumbnailCache.set(key, data || '');
+    }
+    if (data && state.report?.sessionId === sessionId && image.isConnected) {
+      image.addEventListener('load', () => image.closest('.photo-thumb')?.classList.add('loaded'), {once: true});
+      image.src = data;
+    }
+  } catch (_) {
+    // Missing or malformed embedded thumbnails keep the lightweight JPG placeholder.
+  }
+}
+
+async function revealFile(index) {
+  if (!state.report) return;
+  try {
+    await api().RevealFile(state.report.sessionId, index);
+  } catch (error) {
+    showToast(errorText(error), true);
+  }
 }
 
 function updateSelectAllState(files = filteredFiles()) {

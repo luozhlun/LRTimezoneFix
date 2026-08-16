@@ -2,7 +2,7 @@
 
 `LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后导出的 JPG/JPEG 中，日期时间已经平移、但时区及关联字段没有同步的问题。
 
-当前版本：`1.3.0`
+当前版本：`1.4.0`
 
 ## 功能
 
@@ -13,6 +13,7 @@
 - ExifTool 全程在后台静默运行，扫描时复用常驻会话，不反复弹出命令行窗口。
 - 将结果分类为“需要修复”“时间一致”“需人工检查”“读取失败”。
 - 支持文件名搜索、状态筛选、逐文件元数据详情和选择性修复。
+- 结果列表按可见区域懒加载 JPG 内嵌 EXIF 缩略图，并可在资源管理器中定位照片。
 - 不写死日本、巴黎或任何城市，依据实际日期时间差通用推断 UTC 偏移。
 - 修复前逐张备份；写入后验证元数据、摘要和 JPEG 图像数据。
 - 写入独有的 `LRTimezoneFix/1;` 审计标记。
@@ -100,7 +101,7 @@ CreateDate             2025:10:01 13:39:15  +09:00
 程序对每张待修照片执行：
 
 1. 在照片所在目录创建 `ExifTool_Backup_YYYYMMDD_HHMMSS`。
-2. 复制原文件并用 SHA-256 验证备份一致。
+2. 复制原文件并用 SHA-256 验证备份一致，同时写入 `LRTimezoneFix_Backup.log`。
 3. 同步 EXIF、XMP、IPTC 和 `IPTCDigest`。
 4. 写入 `LRTimezoneFix/1;` 审计标记；已有 `UserComment` 会保留。
 5. 比较 ExifTool `ImageDataHash`，确认 JPEG 图像数据没有变化。
@@ -110,7 +111,7 @@ CreateDate             2025:10:01 13:39:15  +09:00
 审计标记示例：
 
 ```text
-LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.3.0; repaired-at=2026-01-01T12:00:00+08:00
+LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.4.0; repaired-at=2026-01-01T12:00:00+08:00
 ```
 
 ## 恢复照片
@@ -189,6 +190,12 @@ go-winres make --arch amd64 --out rsrc
 源码、`go.mod`、`go.sum`、README 和内嵌前端应提交到仓库；正式 EXE 建议作为 GitHub Release 附件发布，而不是直接提交进 Git。
 
 ## 版本记录
+
+### 1.4.0
+
+- 结果列表新增 JPG 内嵌 EXIF 缩略图，按可见区域懒加载，不拖慢初始扫描。
+- 新增“在资源管理器中显示”按钮，可打开照片目录并选中文件。
+- 每个备份目录新增 `LRTimezoneFix_Backup.log`，记录版本、路径、哈希、时区修正和验证/恢复状态。
 
 ### 1.3.0
 

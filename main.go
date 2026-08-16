@@ -13,7 +13,7 @@ import (
 
 const (
 	appName       = "LRTimezoneFix"
-	version       = "1.3.0"
+	version       = "1.4.0"
 	backupPrefix  = "ExifTool_Backup_"
 	auditPrefix   = "LRTimezoneFix/1;"
 	defaultMarker = "timezone-normalize"

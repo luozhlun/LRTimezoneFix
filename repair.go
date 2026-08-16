@@ -39,19 +39,30 @@ func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candida
 	if err != nil || sourceHash != backupHash {
 		return fmt.Errorf("备份 SHA-256 验证失败")
 	}
+	logEntryWritten := false
+	if err := appendBackupLogEntry(backupDir, file, backupPath, sourceHash, *candidate, repairedAt); err != nil {
+		return fmt.Errorf("无法写入备份日志：%w", err)
+	}
+	logEntryWritten = true
 
 	restoreNeeded := true
 	defer func() {
 		if !restoreNeeded || err == nil {
 			return
 		}
+		status := "FAILED_AND_RESTORED"
 		if restoreErr := copyFileExact(backupPath, file); restoreErr != nil {
 			err = fmt.Errorf("%v；自动恢复也失败：%w；请手动使用备份 %s", err, restoreErr, backupPath)
-			return
+			status = "FAILED_RESTORE_ERROR"
+		} else {
+			restoredHash, hashErr := fileSHA256(file)
+			if hashErr != nil || restoredHash != sourceHash {
+				err = fmt.Errorf("%v；自动恢复后的 SHA-256 验证失败；请手动使用备份 %s", err, backupPath)
+				status = "FAILED_RESTORE_HASH_ERROR"
+			}
 		}
-		restoredHash, hashErr := fileSHA256(file)
-		if hashErr != nil || restoredHash != sourceHash {
-			err = fmt.Errorf("%v；自动恢复后的 SHA-256 验证失败；请手动使用备份 %s", err, backupPath)
+		if logEntryWritten {
+			_ = appendBackupLogResult(backupDir, file, status, err.Error(), time.Now())
 		}
 	}()
 
@@ -79,9 +90,59 @@ func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candida
 	if err := verifyRepair(*candidate, after, marker); err != nil {
 		return err
 	}
+	if err := appendBackupLogResult(backupDir, file, "REPAIR_VERIFIED", "元数据、摘要和 JPEG 图像数据验证通过", time.Now()); err != nil {
+		return fmt.Errorf("无法更新备份日志：%w", err)
+	}
 
 	restoreNeeded = false
 	return nil
+}
+
+func appendBackupLogEntry(backupDir, sourcePath, backupPath string, sourceHash [32]byte, candidate analysisResult, batchTime time.Time) error {
+	logPath := filepath.Join(backupDir, "LRTimezoneFix_Backup.log")
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return err
+	}
+	var text strings.Builder
+	if info.Size() == 0 {
+		fmt.Fprintf(&text, "LRTimezoneFix Backup Log\nLogFormat=1\nToolVersion=%s\nBatchTime=%s\nPurpose=修复 Lightroom 导出 JPG 的时区残留；本目录保存修改前原文件。\nRestore=如需恢复，请关闭可能占用照片的软件，将备份 JPG 复制回 OriginalPath 并覆盖。\n\n", version, batchTime.Format(time.RFC3339))
+	}
+	fmt.Fprintf(&text, "[Backup]\nFileName=%s\nOriginalPath=%s\nBackupPath=%s\nOriginalSHA256=%x\nSourceOffset=%s\nTargetOffset=%s\nWallShift=%s\nTargetLocal=%s\nBackupState=VERIFIED\n\n",
+		filepath.Base(sourcePath), sourcePath, backupPath, sourceHash, candidate.SourceOffset, candidate.TargetOffset, formatSignedMinutes(candidate.ShiftMinutes), candidate.TargetLocal)
+	if _, err := file.WriteString(text.String()); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func appendBackupLogResult(backupDir, sourcePath, status, detail string, at time.Time) error {
+	logPath := filepath.Join(backupDir, "LRTimezoneFix_Backup.log")
+	file, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	detail = strings.NewReplacer("\r", " ", "\n", " ").Replace(detail)
+	_, writeErr := fmt.Fprintf(file, "[Result]\nFileName=%s\nStatus=%s\nTime=%s\nDetail=%s\n\n", filepath.Base(sourcePath), status, at.Format(time.RFC3339), detail)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 func buildAuditMarker(candidate analysisResult, repairedAt time.Time) string {
