@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>LRTimezoneFix</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">TZ</div>
+        <div>
+          <div class="brand-title">LRTimezoneFix</div>
+          <div class="brand-subtitle">Lightroom 导出 JPG 时区修复</div>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span id="versionBadge" class="version-badge">v1.1.0</span>
+        <span id="exifStatus" class="status-pill waiting"><span class="status-dot"></span>正在检查 ExifTool</span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="source-card">
+        <div class="source-copy">
+          <span class="eyebrow">扫描范围</span>
+          <h1>选择要检查的照片</h1>
+          <p>可以递归扫描一个文件夹，也可以只选择几张 JPG/JPEG。扫描阶段完全只读。</p>
+        </div>
+        <div class="source-actions">
+          <button id="folderButton" class="button secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2Z"/><path d="M2 10h20"/></svg>
+            选择文件夹
+          </button>
+          <button id="filesButton" class="button secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v5h4M9 13h6M9 17h6"/></svg>
+            选择 JPG
+          </button>
+        </div>
+        <div id="selectionPanel" class="selection-panel empty">
+          <div class="selection-icon" aria-hidden="true">◎</div>
+          <div class="selection-text">
+            <strong id="selectionTitle">尚未选择</strong>
+            <span id="selectionPath">选择照片后即可开始扫描</span>
+          </div>
+          <button id="scanButton" class="button primary" type="button" disabled>开始扫描</button>
+        </div>
+      </section>
+
+      <section id="progressPanel" class="progress-panel hidden" aria-live="polite">
+        <div class="progress-copy">
+          <strong id="progressTitle">正在扫描</strong>
+          <span id="progressMessage">正在准备……</span>
+        </div>
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        <span id="progressPercent" class="progress-percent">0%</span>
+      </section>
+
+      <section id="repairNotice" class="repair-notice hidden" aria-live="polite"></section>
+
+      <section id="resultsSection" class="results-section hidden">
+        <div class="summary-grid">
+          <article class="summary-card total"><span>扫描文件</span><strong id="totalCount">0</strong></article>
+          <article class="summary-card candidate"><span>需要修复</span><strong id="candidateCount">0</strong></article>
+          <article class="summary-card consistent"><span>时间一致</span><strong id="consistentCount">0</strong></article>
+          <article class="summary-card attention"><span>需人工检查</span><strong id="attentionCount">0</strong></article>
+        </div>
+
+        <div class="results-card">
+          <div class="results-heading">
+            <div>
+              <span class="eyebrow">分析结果</span>
+              <h2>照片明细</h2>
+            </div>
+            <div class="results-tools">
+              <label class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <input id="searchInput" type="search" placeholder="搜索文件名">
+              </label>
+              <select id="stateFilter" aria-label="筛选状态">
+                <option value="all">全部状态</option>
+                <option value="candidate">需要修复</option>
+                <option value="consistent">时间一致</option>
+                <option value="attention">需人工检查</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="select-row">
+            <label class="check-label"><input id="selectAllCandidates" type="checkbox">选择当前显示的可修复照片</label>
+            <span id="visibleCount">0 张</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th class="check-col"></th><th>文件</th><th>当前拍摄时间</th><th>残留时区</th><th>推断结果</th><th>状态</th></tr>
+              </thead>
+              <tbody id="resultsBody"></tbody>
+            </table>
+            <div id="emptyResults" class="empty-results hidden">没有符合当前筛选条件的照片</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer id="actionBar" class="action-bar hidden">
+      <div>
+        <strong id="selectedCount">已选择 0 张</strong>
+        <span>修复前会逐张备份，失败时自动恢复</span>
+      </div>
+      <button id="repairButton" class="button danger" type="button" disabled>
+        修复所选照片
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </footer>
+  </div>
+
+  <aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+    <button id="drawerBackdrop" class="drawer-backdrop" aria-label="关闭详情"></button>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <div><span class="eyebrow">元数据详情</span><h2 id="detailName">照片</h2></div>
+        <button id="closeDrawer" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <div id="detailContent" class="detail-content"></div>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

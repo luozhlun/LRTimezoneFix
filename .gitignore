@@ -1,0 +1,54 @@
+# Local photo samples and ExifTool backups
+/*测试用/
+/*成片/
+.test/
+ExifTool_Backup_*/
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.nef
+*.NEF
+*.cr2
+*.CR2
+*.cr3
+*.CR3
+*.arw
+*.ARW
+*.raf
+*.RAF
+*.dng
+*.DNG
+
+# Go caches and build output
+.gocache/
+.gomodcache/
+.gopath/
+.tools/
+*.exe
+*.exe~
+*.dll
+*.test
+coverage.out
+coverage.html
+build/bin/
+
+# Frontend/tool caches if added later
+node_modules/
+frontend/node_modules/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+.DS_Store
+
+# Editors and local agent metadata
+.vscode/
+.idea/
+*.user
+.agents/
+.codex/
+work/
