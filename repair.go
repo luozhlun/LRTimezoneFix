@@ -11,6 +11,10 @@ import (
 )
 
 func repairFile(exifTool string, candidate *analysisResult, stamp string, repairedAt time.Time) (err error) {
+	return repairFileWithRunner(exifTool, directExifToolRunner{exifTool: exifTool}, candidate, stamp, repairedAt)
+}
+
+func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candidate *analysisResult, stamp string, repairedAt time.Time) (err error) {
 	file := candidate.File
 	backupDir := filepath.Join(filepath.Dir(file), backupPrefix+stamp)
 	backupPath := filepath.Join(backupDir, filepath.Base(file))
@@ -68,7 +72,7 @@ func repairFile(exifTool string, candidate *analysisResult, stamp string, repair
 		return fmt.Errorf("ExifTool 写入失败：%v；%s", writeErr, strings.TrimSpace(stderr))
 	}
 
-	after, err := readMetadata(exifTool, file)
+	after, err := readMetadataWithRunner(reader, file)
 	if err != nil {
 		return fmt.Errorf("写后读取失败：%w", err)
 	}

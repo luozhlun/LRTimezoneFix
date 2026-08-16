@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -12,7 +13,7 @@ import (
 
 const (
 	appName       = "LRTimezoneFix"
-	version       = "1.1.0"
+	version       = "1.3.0"
 	backupPrefix  = "ExifTool_Backup_"
 	auditPrefix   = "LRTimezoneFix/1;"
 	defaultMarker = "timezone-normalize"
@@ -143,10 +144,15 @@ func run(opts options) error {
 	stamp := batchTime.Format("20060102_150405")
 	succeeded := 0
 	failed := 0
+	reader := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
+	if persistent, sessionErr := newExifToolSession(exifTool); sessionErr == nil {
+		reader = persistent
+		defer persistent.Close()
+	}
 	fmt.Println("\n================ 开始修复 ================")
 	for i := range candidates {
 		candidate := &candidates[i]
-		if err := repairFile(exifTool, candidate, stamp, batchTime); err != nil {
+		if err := repairFileWithRunner(exifTool, reader, candidate, stamp, batchTime); err != nil {
 			failed++
 			fmt.Printf("失败：%s\n  %v\n", relativeName(root, candidate.File), err)
 		} else {
@@ -187,11 +193,26 @@ func resolveRoot(root string) (string, error) {
 }
 
 func findJPEGs(root string) ([]string, error) {
+	return findJPEGsWithContext(context.Background(), root, nil)
+}
+
+func findJPEGsWithContext(ctx context.Context, root string, progress func(visited, found int)) ([]string, error) {
 	var files []string
+	visited := 0
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		if walkErr != nil {
+			if path == root {
+				return walkErr
+			}
+			// Large roots such as a system drive commonly contain protected
+			// directories. Skip an inaccessible subtree instead of aborting the
+			// entire user-requested scan.
+			return nil
+		}
+		visited++
 		if entry.IsDir() {
 			if path != root && shouldSkipDirectory(entry.Name()) {
 				return filepath.SkipDir
@@ -202,16 +223,19 @@ func findJPEGs(root string) ([]string, error) {
 		if ext == ".jpg" || ext == ".jpeg" {
 			files = append(files, path)
 		}
+		if progress != nil && (visited == 1 || visited%500 == 0) {
+			progress(visited, len(files))
+		}
 		return nil
 	})
+	if progress != nil {
+		progress(visited, len(files))
+	}
 	return files, err
 }
 
 func shouldSkipDirectory(name string) bool {
-	// Dot-prefixed directories in the project are development/cache folders,
-	// not photo folders. Skipping all of them also keeps an EXE placed in the
-	// source tree from scanning .test and .gocache.
-	return strings.HasPrefix(name, ".") || isBackupDirectory(name)
+	return isBackupDirectory(name)
 }
 
 func isBackupDirectory(name string) bool {

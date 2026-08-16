@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,6 +37,29 @@ func TestValidateRepairIndices(t *testing.T) {
 	}
 	if _, err := validateRepairIndices(results, []int{2}); err == nil {
 		t.Fatal("ambiguous file must not be accepted for repair")
+	}
+}
+
+func TestGUIAppCancelScan(t *testing.T) {
+	app := newGUIApp()
+	ctx, err := app.beginScanOperation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.CancelScan() {
+		t.Fatal("active scan was not cancelled")
+	}
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("unexpected context error: %v", ctx.Err())
+		}
+	default:
+		t.Fatal("scan context is still active")
+	}
+	app.endOperation()
+	if app.CancelScan() {
+		t.Fatal("inactive scan reported as cancelled")
 	}
 }
 

@@ -5,6 +5,7 @@ const state = {
   report: null,
   selected: new Set(),
   busy: false,
+  cancelRequested: false,
   filter: 'all',
   search: '',
 };
@@ -55,6 +56,7 @@ function bindEvents() {
   el('folderButton').addEventListener('click', () => choose('folder'));
   el('filesButton').addEventListener('click', () => choose('files'));
   el('scanButton').addEventListener('click', () => scanSelection());
+  el('cancelScanButton').addEventListener('click', cancelScan);
   el('repairButton').addEventListener('click', repairSelected);
   el('searchInput').addEventListener('input', (event) => { state.search = event.target.value.trim().toLowerCase(); renderRows(); });
   el('stateFilter').addEventListener('change', (event) => { state.filter = event.target.value; renderRows(); });
@@ -87,6 +89,7 @@ async function choose(mode) {
 
 async function scanSelection(options = {}) {
   if (!state.selection || state.busy) return;
+  state.cancelRequested = false;
   setBusy(true);
   showProgress('scan', 0, 1, '正在准备扫描……');
   if (!options.preserveNotice) el('repairNotice').classList.add('hidden');
@@ -96,10 +99,29 @@ async function scanSelection(options = {}) {
     renderReport();
     showToast(state.report.summary.candidates > 0 ? `发现 ${state.report.summary.candidates} 张需要修复的照片` : '扫描完成，没有发现需要修复的照片');
   } catch (error) {
-    showToast(errorText(error), true, 6500);
+    if (state.cancelRequested) {
+      showToast('扫描已终止；没有修改任何文件');
+    } else {
+      showToast(errorText(error), true, 6500);
+    }
   } finally {
     hideProgressSoon();
     setBusy(false);
+    state.cancelRequested = false;
+  }
+}
+
+async function cancelScan() {
+  if (!state.busy || state.cancelRequested) return;
+  state.cancelRequested = true;
+  el('cancelScanButton').disabled = true;
+  el('progressMessage').textContent = '正在安全终止当前扫描……';
+  try {
+    const accepted = await api().CancelScan();
+    if (!accepted) state.cancelRequested = false;
+  } catch (error) {
+    state.cancelRequested = false;
+    showToast(errorText(error), true);
   }
 }
 
@@ -108,17 +130,25 @@ function updateProgress(progress) {
 }
 
 function showProgress(phase, done, total, message) {
+  const indeterminate = !total || total <= 0;
   const safeTotal = Math.max(total || 1, 1);
   const percent = Math.max(0, Math.min(100, Math.round((done / safeTotal) * 100)));
   el('progressPanel').classList.remove('hidden');
   el('progressTitle').textContent = phase === 'repair' ? '正在安全修复' : '正在分析元数据';
   el('progressMessage').textContent = message || '正在处理……';
-  el('progressBar').style.width = `${percent}%`;
-  el('progressPercent').textContent = `${percent}%`;
+  el('progressBar').classList.toggle('indeterminate', indeterminate);
+  el('progressBar').style.width = indeterminate ? '32%' : `${percent}%`;
+  el('progressPercent').textContent = indeterminate ? '…' : `${percent}%`;
+  const cancelButton = el('cancelScanButton');
+  cancelButton.classList.toggle('hidden', phase !== 'scan');
+  cancelButton.disabled = state.cancelRequested;
 }
 
 function hideProgressSoon() {
-  window.setTimeout(() => el('progressPanel').classList.add('hidden'), 550);
+  window.setTimeout(() => {
+    el('progressPanel').classList.add('hidden');
+    el('cancelScanButton').classList.add('hidden');
+  }, 550);
 }
 
 function renderReport() {

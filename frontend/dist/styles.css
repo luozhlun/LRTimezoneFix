@@ -63,13 +63,18 @@ h2 { font-size: 20px; margin-top: 4px; }
 .selection-text strong { font-size: 14px; }
 .selection-text span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.progress-panel { margin-top: 16px; min-height: 70px; border-radius: 16px; padding: 14px 18px; display: grid; grid-template-columns: minmax(190px,.55fr) minmax(260px,1fr) 48px; align-items: center; gap: 18px; background: #172033; color: white; box-shadow: 0 12px 32px rgba(15,23,42,.18); }
+.progress-panel { margin-top: 16px; min-height: 70px; border-radius: 16px; padding: 14px 18px; display: grid; grid-template-columns: minmax(190px,.55fr) minmax(260px,1fr) 48px auto; align-items: center; gap: 18px; background: #172033; color: white; box-shadow: 0 12px 32px rgba(15,23,42,.18); }
 .progress-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .progress-copy strong { font-size: 13px; }
 .progress-copy span { color: #aebbd0; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .progress-track { height: 7px; border-radius: 999px; background: #344056; overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: #65a8ff; border-radius: inherit; transition: width .25s ease; }
+.progress-bar.indeterminate { animation: indeterminate-progress 1.15s ease-in-out infinite; transition: none; }
 .progress-percent { text-align: right; font-size: 12px; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+.cancel-scan { height: 34px; padding: 0 12px; border: 1px solid #526078; border-radius: 10px; color: #e5edf8; background: #2a3549; cursor: pointer; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.cancel-scan:hover:not(:disabled) { background: #37445a; border-color: #6b7a93; }
+.cancel-scan:disabled { cursor: wait; opacity: .58; }
+@keyframes indeterminate-progress { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
 
 .repair-notice { margin-top: 16px; padding: 14px 17px; border-radius: 15px; color: #086654; background: #ddf7ee; border: 1px solid #b7eadc; font-size: 13px; line-height: 1.6; }
 .results-section { margin-top: 18px; }

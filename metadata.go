@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,7 +110,11 @@ func findExifTool() (string, error) {
 }
 
 func readMetadata(exifTool, file string) (metadata, error) {
-	all, failures := readMetadataBatch(exifTool, []string{file})
+	return readMetadataWithRunner(directExifToolRunner{exifTool: exifTool}, file)
+}
+
+func readMetadataWithRunner(runner exifToolCommandRunner, file string) (metadata, error) {
+	all, failures := readMetadataBatchWithRunner([]string{file}, nil, runner)
 	if err := failures[file]; err != nil {
 		return metadata{}, err
 	}
@@ -125,6 +130,26 @@ func readMetadataBatch(exifTool string, files []string) (map[string]metadata, ma
 }
 
 func readMetadataBatchWithProgress(exifTool string, files []string, progress func(done, total int)) (map[string]metadata, map[string]error) {
+	results, failures, _ := readMetadataBatchWithProgressContext(context.Background(), exifTool, files, progress)
+	return results, failures
+}
+
+func readMetadataBatchWithProgressContext(ctx context.Context, exifTool string, files []string, progress func(done, total int)) (map[string]metadata, map[string]error, error) {
+	runner := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
+	session, err := newExifToolSession(exifTool)
+	if err == nil {
+		runner = session
+		defer session.Close()
+	}
+	return readMetadataBatchWithRunnerContext(ctx, files, progress, runner)
+}
+
+func readMetadataBatchWithRunner(files []string, progress func(done, total int), runner exifToolCommandRunner) (map[string]metadata, map[string]error) {
+	results, failures, _ := readMetadataBatchWithRunnerContext(context.Background(), files, progress, runner)
+	return results, failures
+}
+
+func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, progress func(done, total int), runner exifToolCommandRunner) (map[string]metadata, map[string]error, error) {
 	results := make(map[string]metadata, len(files))
 	failures := make(map[string]error)
 	byDirectory := make(map[string][]string)
@@ -135,9 +160,12 @@ func readMetadataBatchWithProgress(exifTool string, files []string, progress fun
 	}
 
 	done := 0
-	const batchSize = 32
+	const batchSize = 16
 	for dir, group := range byDirectory {
 		for start := 0; start < len(group); start += batchSize {
+			if err := ctx.Err(); err != nil {
+				return results, failures, err
+			}
 			end := min(start+batchSize, len(group))
 			batch := group[start:end]
 			args := metadataReadArguments()
@@ -145,7 +173,10 @@ func readMetadataBatchWithProgress(exifTool string, files []string, progress fun
 			for _, file := range batch {
 				names = append(names, filepath.Base(file))
 			}
-			stdout, stderr, err := runExifToolForFiles(exifTool, dir, names, args...)
+			stdout, stderr, err := runner.RunFiles(dir, names, args...)
+			if cancelErr := ctx.Err(); cancelErr != nil {
+				return results, failures, cancelErr
+			}
 			if err != nil {
 				for _, file := range batch {
 					failures[file] = fmt.Errorf("ExifTool 读取失败：%v；%s", err, strings.TrimSpace(stderr))
@@ -179,7 +210,7 @@ func readMetadataBatchWithProgress(exifTool string, files []string, progress fun
 			}
 		}
 	}
-	return results, failures
+	return results, failures, nil
 }
 
 func metadataReadArguments() []string {
@@ -286,6 +317,7 @@ func runExifTool(exifTool, dir string, args ...string) ([]byte, string, error) {
 	cmd := exec.Command(exifTool, args...)
 	cmd.Dir = dir
 	cmd.Env = cleanLocaleEnvironment(os.Environ())
+	configureChildProcess(cmd)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

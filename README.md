@@ -2,13 +2,15 @@
 
 `LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后导出的 JPG/JPEG 中，日期时间已经平移、但时区及关联字段没有同步的问题。
 
-当前版本：`1.1.0`
+当前版本：`1.3.0`
 
 ## 功能
 
 - 现代化 Windows GUI，支持系统浅色/深色主题。
-- 选择一个文件夹递归扫描，或一次选择多张 JPG/JPEG。
+- 使用 Windows 原生选择窗口，可递归扫描文件夹，也可只选多张 JPG/JPEG。
 - 扫描阶段完全只读，显示实时进度。
+- 递归扫描由用户选择的全部子目录，并可随时点击“终止扫描”。
+- ExifTool 全程在后台静默运行，扫描时复用常驻会话，不反复弹出命令行窗口。
 - 将结果分类为“需要修复”“时间一致”“需人工检查”“读取失败”。
 - 支持文件名搜索、状态筛选、逐文件元数据详情和选择性修复。
 - 不写死日本、巴黎或任何城市，依据实际日期时间差通用推断 UTC 偏移。
@@ -30,6 +32,7 @@
 1. 双击 `LRTimezoneFix.exe`。
 2. 点击“选择文件夹”递归扫描，或者点击“选择 JPG”选择特定照片。
 3. 点击“开始扫描”。此阶段不会修改任何文件。
+   扫描超大目录或磁盘根目录时，可以点击进度条右侧的“终止扫描”。
 4. 查看摘要、筛选结果，并点击照片查看关键字段和推断依据。
 5. 勾选需要处理的照片，点击“修复所选照片”。
 6. 在 Windows 原生确认框中确认后，程序才会开始备份和写入。
@@ -107,7 +110,7 @@ CreateDate             2025:10:01 13:39:15  +09:00
 审计标记示例：
 
 ```text
-LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.1.0; repaired-at=2026-01-01T12:00:00+08:00
+LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.3.0; repaired-at=2026-01-01T12:00:00+08:00
 ```
 
 ## 恢复照片
@@ -120,15 +123,17 @@ ExifTool_Backup_YYYYMMDD_HHMMSS
 
 需要恢复时，关闭 Lightroom 或其他可能占用照片的软件，把备份 JPG 复制回上一级目录并覆盖当前文件。
 
-## 开发与编译
+## 开发依赖与编译
 
-要求：
+开发环境：
 
-- Go 1.26 或兼容版本
-- Windows 10/11 x64
-- 构建时可访问 Go 模块源
+- Windows 10/11 x64。
+- Go 1.26 或与 `go.mod` 兼容的更新版本。
+- Wails v2.13 由 `go.mod` 管理，不需要全局安装 Wails CLI。
+- 不需要 Node.js、npm 或 GCC；前端是直接嵌入的原生 HTML/CSS/JavaScript。
+- `go-winres` 仅在修改应用图标、Windows 版本信息或清单时需要，普通编译不需要。
 
-下载依赖：
+在项目目录下载 Go 依赖：
 
 ```powershell
 go mod download
@@ -137,8 +142,8 @@ go mod download
 运行测试：
 
 ```powershell
-go test ./...
-go vet ./...
+go test -tags "desktop,production" ./...
+go vet -tags "desktop,production" ./...
 ```
 
 编译无控制台的正式 GUI：
@@ -147,7 +152,7 @@ go vet ./...
 go build -tags "desktop,production" -trimpath -ldflags "-s -w -H windowsgui" -o LRTimezoneFix.exe .
 ```
 
-需要调试原有命令行入口时，可以构建带控制台版本：
+需要进行命令行调试时，可以构建带控制台版本：
 
 ```powershell
 go build -tags "desktop,production" -trimpath -o LRTimezoneFix-cli.exe .
@@ -156,7 +161,21 @@ LRTimezoneFix-cli.exe -root "D:\照片目录" -analyze-only -no-pause
 
 前端文件直接位于 `frontend/dist`，不依赖 npm 构建流程。
 
-Windows 图标、版本信息和高 DPI 清单已经保存在 `rsrc_windows_amd64.syso`。版本升级时可以使用 [go-winres](https://github.com/tc-hib/go-winres) 重新生成该资源文件。
+Windows 图标、版本信息和高 DPI 清单已经保存在 `rsrc_windows_amd64.syso`。因此从仓库直接编译时不需要安装 `go-winres`。
+
+修改图标或升级版本信息时，先安装固定版本的 [go-winres](https://github.com/tc-hib/go-winres)：
+
+```powershell
+go install github.com/tc-hib/go-winres@v0.3.3
+```
+
+修改 `build/appicon.png` 或 `winres/winres.json` 后，重新生成 Windows 资源：
+
+```powershell
+go-winres make --arch amd64 --out rsrc
+```
+
+生成的 `rsrc_windows_amd64.syso` 应随源码提交。升级版本时还要同步修改 `main.go` 中的版本号和 `winres/winres.json` 中的文件/产品版本，然后重新编译 EXE。
 
 ## GitHub 仓库说明
 
@@ -170,6 +189,19 @@ Windows 图标、版本信息和高 DPI 清单已经保存在 `rsrc_windows_amd6
 源码、`go.mod`、`go.sum`、README 和内嵌前端应提交到仓库；正式 EXE 建议作为 GitHub Release 附件发布，而不是直接提交进 Git。
 
 ## 版本记录
+
+### 1.3.0
+
+- 递归扫描不再跳过以 `.` 开头的目录，完整遵循用户选择的扫描范围。
+- 新增“终止扫描”按钮，可中止目录查找或 ExifTool 元数据分析。
+- 扫描磁盘根目录时自动跳过无法访问的系统子目录，不因单个权限错误中断。
+- 元数据读取批次调整为 16 张，改善扫描进度反馈。
+
+### 1.2.0
+
+- ExifTool 子进程改为后台静默运行，扫描时不再闪现终端窗口。
+- 扫描和写后复查复用 ExifTool `-stay_open` 会话，减少反复启动开销。
+- 保留 Windows 原生的文件夹与 JPG 选择窗口。
 
 ### 1.1.0
 

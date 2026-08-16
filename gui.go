@@ -25,10 +25,11 @@ var frontendAssets embed.FS
 const progressEvent = "lrtimezonefix:progress"
 
 type GUIApp struct {
-	ctx      context.Context
-	mu       sync.Mutex
-	busy     bool
-	sessions map[string]*guiSession
+	ctx        context.Context
+	mu         sync.Mutex
+	busy       bool
+	scanCancel context.CancelFunc
+	sessions   map[string]*guiSession
 }
 
 type guiSession struct {
@@ -190,7 +191,8 @@ func (a *GUIApp) ChooseFiles() (GUISelection, error) {
 }
 
 func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
-	if err := a.beginOperation(); err != nil {
+	scanCtx, err := a.beginScanOperation()
+	if err != nil {
 		return GUIScanReport{}, err
 	}
 	defer a.endOperation()
@@ -199,8 +201,16 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 	if err != nil {
 		return GUIScanReport{}, err
 	}
-	files, root, err := resolveGUISelection(selection)
+	if selection.Mode == "folder" {
+		a.emitProgress("scan", 0, 0, "正在递归查找 JPG/JPEG……")
+	}
+	files, root, err := resolveGUISelectionContext(scanCtx, selection, func(visited, found int) {
+		a.emitProgress("scan", 0, 0, fmt.Sprintf("正在查找照片：已检查 %d 项，发现 %d 张", visited, found))
+	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
+		}
 		return GUIScanReport{}, err
 	}
 	if len(files) == 0 {
@@ -208,12 +218,21 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 	}
 
 	a.emitProgress("scan", 0, len(files), fmt.Sprintf("正在读取 %d 张照片的元数据", len(files)))
-	allMetadata, readErrors := readMetadataBatchWithProgress(exifTool, files, func(done, total int) {
+	allMetadata, readErrors, err := readMetadataBatchWithProgressContext(scanCtx, exifTool, files, func(done, total int) {
 		a.emitProgress("scan", done, total, fmt.Sprintf("已分析 %d / %d", done, total))
 	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
+		}
+		return GUIScanReport{}, err
+	}
 
 	results := make([]analysisResult, 0, len(files))
 	for _, file := range files {
+		if scanCtx.Err() != nil {
+			return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
+		}
 		meta, ok := allMetadata[file]
 		readErr := readErrors[file]
 		if !ok && readErr == nil {
@@ -273,11 +292,16 @@ func (a *GUIApp) Repair(request GUIRepairRequest) (GUIRepairReport, error) {
 	batchTime := time.Now()
 	stamp := batchTime.Format("20060102_150405")
 	report := GUIRepairReport{BackupFolderName: backupPrefix + stamp}
+	reader := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
+	if persistent, sessionErr := newExifToolSession(exifTool); sessionErr == nil {
+		reader = persistent
+		defer persistent.Close()
+	}
 	for position, index := range indices {
 		candidate := &session.Results[index]
 		a.emitProgress("repair", position, len(indices), "正在修复 "+filepath.Base(candidate.File))
 		item := GUIRepairItem{Index: index}
-		if err := repairFile(exifTool, candidate, stamp, batchTime); err != nil {
+		if err := repairFileWithRunner(exifTool, reader, candidate, stamp, batchTime); err != nil {
 			item.Error = err.Error()
 			report.Failed++
 		} else {
@@ -303,10 +327,38 @@ func (a *GUIApp) beginOperation() error {
 	return nil
 }
 
+func (a *GUIApp) beginScanOperation() (context.Context, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.busy {
+		return nil, errors.New("另一个操作正在进行，请稍候")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.busy = true
+	a.scanCancel = cancel
+	return ctx, nil
+}
+
+func (a *GUIApp) CancelScan() bool {
+	a.mu.Lock()
+	cancel := a.scanCancel
+	a.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
 func (a *GUIApp) endOperation() {
 	a.mu.Lock()
+	cancel := a.scanCancel
+	a.scanCancel = nil
 	a.busy = false
 	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (a *GUIApp) emitProgress(phase string, done, total int, message string) {
@@ -317,6 +369,13 @@ func (a *GUIApp) emitProgress(phase string, done, total int, message string) {
 }
 
 func resolveGUISelection(selection GUISelection) ([]string, string, error) {
+	return resolveGUISelectionContext(context.Background(), selection, nil)
+}
+
+func resolveGUISelectionContext(ctx context.Context, selection GUISelection, progress func(visited, found int)) ([]string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	switch selection.Mode {
 	case "folder":
 		root, err := filepath.Abs(selection.Root)
@@ -327,7 +386,7 @@ func resolveGUISelection(selection GUISelection) ([]string, string, error) {
 		if err != nil || !info.IsDir() {
 			return nil, "", errors.New("所选文件夹不存在或无法访问")
 		}
-		files, err := findJPEGs(root)
+		files, err := findJPEGsWithContext(ctx, root, progress)
 		return files, filepath.Clean(root), err
 	case "files":
 		files, err := normalizeJPEGSelection(selection.Files)

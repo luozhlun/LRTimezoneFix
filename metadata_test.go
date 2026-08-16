@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +10,7 @@ import (
 	"time"
 )
 
-func TestFindJPEGsSkipsDevelopmentAndBackupDirectories(t *testing.T) {
+func TestFindJPEGsIncludesDotDirectoriesAndSkipsBackups(t *testing.T) {
 	root := t.TempDir()
 	visible := filepath.Join(root, "photos", "visible.jpg")
 	hidden := filepath.Join(root, ".test", "hidden.jpg")
@@ -26,8 +28,17 @@ func TestFindJPEGsSkipsDevelopmentAndBackupDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 || files[0] != visible {
+	if len(files) != 2 || files[0] != hidden || files[1] != visible {
 		t.Fatalf("unexpected files: %v", files)
+	}
+}
+
+func TestFindJPEGsHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := findJPEGsWithContext(ctx, t.TempDir(), nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
 
