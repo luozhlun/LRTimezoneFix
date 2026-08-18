@@ -36,6 +36,9 @@ type metadata struct {
 	HistoryWhen            string
 	GPSDateStamp           string
 	GPSTimeStamp           string
+	GPSDateTime            string
+	GPSLatitude            string
+	GPSLongitude           string
 	UserComment            string
 	IPTCDigest             string
 	CurrentIPTCDigest      string
@@ -81,6 +84,7 @@ type analysisResult struct {
 	SourceOffset string
 	TargetOffset string
 	ShiftMinutes int
+	GPSReference GPSTimezoneReference
 }
 
 func (r analysisResult) Repairable() bool {
@@ -240,6 +244,9 @@ func metadataReadArguments() []string {
 		"-XMP-xmpMM:HistoryWhen",
 		"-GPS:GPSDateStamp",
 		"-GPS:GPSTimeStamp",
+		"-Composite:GPSDateTime",
+		"-Composite:GPSLatitude",
+		"-Composite:GPSLongitude",
 		"-ExifIFD:UserComment",
 		"-Photoshop:IPTCDigest",
 		"-File:CurrentIPTCDigest",
@@ -303,6 +310,9 @@ func decodeMetadata(m map[string]any) metadata {
 		HistoryWhen:            getString(m, "XMP-xmpMM:HistoryWhen"),
 		GPSDateStamp:           getString(m, "GPS:GPSDateStamp"),
 		GPSTimeStamp:           getString(m, "GPS:GPSTimeStamp"),
+		GPSDateTime:            getString(m, "Composite:GPSDateTime"),
+		GPSLatitude:            getString(m, "Composite:GPSLatitude"),
+		GPSLongitude:           getString(m, "Composite:GPSLongitude"),
 		UserComment:            getString(m, "ExifIFD:UserComment"),
 		IPTCDigest:             getString(m, "Photoshop:IPTCDigest"),
 		CurrentIPTCDigest:      getString(m, "File:CurrentIPTCDigest"),

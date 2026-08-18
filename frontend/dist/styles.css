@@ -115,8 +115,10 @@ tbody tr { cursor: pointer; transition: background .12s ease; }
 tbody tr:hover { background: #f7faff; }
 tbody tr:last-child td { border-bottom: 0; }
 .file-cell { min-width: 0; }
-.file-name { color: #1f2937; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.file-name { min-width: 0; color: #1f2937; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-path { color: #8a98aa; font-size: 10px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timezone-warning-chip { flex: 0 0 auto; display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 6px; color: #9a5707; background: #fff0ce; border: 1px solid #f2d391; font-size: 9px; font-weight: 700; white-space: nowrap; }
 .photo-thumb { width: 46px; height: 46px; position: relative; overflow: hidden; display: grid; place-items: center; border: 1px solid #dbe4ef; border-radius: 9px; color: #8a98aa; background: #edf2f7; font-size: 9px; font-weight: 750; }
 .photo-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .16s ease; }
 .photo-thumb.loaded img { opacity: 1; }
@@ -158,6 +160,17 @@ tbody tr:last-child td { border-bottom: 0; }
 .target-box { padding: 14px; border-radius: 13px; background: #e8f0ff; border: 1px solid #cbdcfc; }
 .target-box strong { display: block; color: #1e4eaa; font-size: 13px; }
 .target-box span { display: block; color: #56709e; font-size: 11px; margin-top: 5px; }
+.gps-reference-box { padding: 5px 14px 12px; border-radius: 13px; background: #f3f7fc; border: 1px solid #d8e3f0; }
+.gps-reference-box .metadata-row:last-of-type { border-bottom: 0; }
+.gps-reference-box > p { margin: 10px 0 0; color: #718096; font-size: 10px; line-height: 1.55; }
+.gps-reference-box.warning { background: #fffaf0; border-color: #efd49e; }
+.gps-reference-box.unavailable { padding: 13px 14px; }
+.gps-reference-box.unavailable strong { display: block; color: #526174; font-size: 12px; }
+.gps-reference-box.unavailable span { display: block; margin-top: 4px; color: #8290a3; font-size: 11px; line-height: 1.55; }
+.timezone-warning { margin-top: 9px; padding: 11px 12px; border-radius: 10px; color: #8a570e; background: #fff0d5; border: 1px solid #efd39d; }
+.timezone-warning strong, .timezone-warning span { display: block; }
+.timezone-warning strong { font-size: 11px; }
+.timezone-warning span { margin-top: 4px; font-size: 10px; line-height: 1.6; }
 
 .toast { position: fixed; left: 50%; bottom: 104px; transform: translate(-50%, 20px); z-index: 80; max-width: 600px; padding: 12px 16px; border-radius: 12px; color: white; background: #172033; box-shadow: 0 12px 32px rgba(15,23,42,.25); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -187,6 +200,13 @@ tbody tr:last-child td { border-bottom: 0; }
   .target-box { background: #1c3154; border-color: #294875; }
   .target-box strong { color: #8bb8ff; }
   .target-box span { color: #a8c2e8; }
+  .timezone-warning-chip { color: #f4c56f; background: #3b2d19; border-color: #674c22; }
+  .gps-reference-box { background: #202c40; border-color: #344259; }
+  .gps-reference-box > p { color: #9ba9bc; }
+  .gps-reference-box.warning { background: #332a1c; border-color: #604923; }
+  .gps-reference-box.unavailable strong { color: #d5deea; }
+  .gps-reference-box.unavailable span { color: #9ba9bc; }
+  .timezone-warning { color: #efc477; background: #392c18; border-color: #5c4523; }
 }
 
 @media (max-width: 1040px) {

@@ -58,20 +58,21 @@ type GUISelection struct {
 }
 
 type GUIFileResult struct {
-	Index          int    `json:"index"`
-	Path           string `json:"path"`
-	DisplayName    string `json:"displayName"`
-	State          string `json:"state"`
-	StateLabel     string `json:"stateLabel"`
-	Repairable     bool   `json:"repairable"`
-	Reason         string `json:"reason"`
-	DateTime       string `json:"dateTimeOriginal"`
-	CreateDate     string `json:"createDate"`
-	OriginalOffset string `json:"offsetTimeOriginal"`
-	CreateOffset   string `json:"offsetTimeDigitized"`
-	TargetLocal    string `json:"targetLocal"`
-	TargetOffset   string `json:"targetOffset"`
-	Shift          string `json:"shift"`
+	Index          int                  `json:"index"`
+	Path           string               `json:"path"`
+	DisplayName    string               `json:"displayName"`
+	State          string               `json:"state"`
+	StateLabel     string               `json:"stateLabel"`
+	Repairable     bool                 `json:"repairable"`
+	Reason         string               `json:"reason"`
+	DateTime       string               `json:"dateTimeOriginal"`
+	CreateDate     string               `json:"createDate"`
+	OriginalOffset string               `json:"offsetTimeOriginal"`
+	CreateOffset   string               `json:"offsetTimeDigitized"`
+	TargetLocal    string               `json:"targetLocal"`
+	TargetOffset   string               `json:"targetOffset"`
+	Shift          string               `json:"shift"`
+	GPSReference   GPSTimezoneReference `json:"gpsTimezoneReference"`
 }
 
 type GUISummary struct {
@@ -328,7 +329,7 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 			results = append(results, analysisResult{File: file, State: stateUnreadable, Reason: readErr.Error()})
 			continue
 		}
-		results = append(results, analyzeMetadata(file, meta))
+		results = append(results, analyzePhotoMetadata(file, meta))
 	}
 
 	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -575,6 +576,7 @@ func buildGUIScanReport(sessionID, root, exifTool string, results []analysisResu
 			TargetLocal:    result.TargetLocal,
 			TargetOffset:   result.TargetOffset,
 			Shift:          formatSignedMinutes(result.ShiftMinutes),
+			GPSReference:   result.GPSReference,
 		}
 		report.Files = append(report.Files, item)
 		report.Summary.Total++

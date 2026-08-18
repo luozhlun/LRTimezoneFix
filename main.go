@@ -13,7 +13,7 @@ import (
 
 const (
 	appName       = "LRTimezoneFix"
-	version       = "1.4.0"
+	version       = "1.5.0"
 	backupPrefix  = "ExifTool_Backup_"
 	auditPrefix   = "LRTimezoneFix/1;"
 	defaultMarker = "timezone-normalize"
@@ -111,7 +111,7 @@ func run(opts options) error {
 				Reason: readErr.Error(),
 			})
 		} else {
-			results = append(results, analyzeMetadata(file, meta))
+			results = append(results, analyzePhotoMetadata(file, meta))
 		}
 		if (i+1)%10 == 0 || i+1 == len(files) {
 			fmt.Printf("  已分析 %d/%d\n", i+1, len(files))

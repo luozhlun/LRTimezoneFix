@@ -2,7 +2,7 @@
 
 `LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后导出的 JPG/JPEG 中，日期时间已经平移、但时区及关联字段没有同步的问题。
 
-当前版本：`1.4.0`
+当前版本：`1.5.0`
 
 ## 功能
 
@@ -14,6 +14,9 @@
 - 将结果分类为“需要修复”“时间一致”“需人工检查”“读取失败”。
 - 支持文件名搜索、状态筛选、逐文件元数据详情和选择性修复。
 - 结果列表按可见区域懒加载 JPG 内嵌 EXIF 缩略图，并可在资源管理器中定位照片。
+- 有 GPS 坐标时，离线推算 IANA 地理时区、拍摄日期对应的 UTC 偏移和夏令时状态，仅供人工参考。
+- 拍摄时间位于时区偏移变更前后 24 小时、重复时段或跳过时段时，在列表和详情中提示人工核对。
+- 照片没有 GPS、GPS 无效或缺少可用日期时会明确说明，不影响扫描、默认勾选或修复结论。
 - 不写死日本、巴黎或任何城市，依据实际日期时间差通用推断 UTC 偏移。
 - 修复前逐张备份；写入后验证元数据、摘要和 JPEG 图像数据。
 - 写入独有的 `LRTimezoneFix/1;` 审计标记。
@@ -96,6 +99,14 @@ CreateDate             2025:10:01 13:39:15  +09:00
 
 `ModifyDate`、`MetadataDate`、`HistoryWhen` 和普通 `OffsetTime` 不会改成拍摄地时区，因为它们记录的是 Lightroom 导出或后续处理时间。GPS 日期时间也不会修改。
 
+## GPS 时区参考
+
+程序会读取照片中的 GPS 经纬度，并通过内嵌的离线时区边界查找 IANA 时区，再结合 GPS UTC 时间（优先）或拍摄当地时间判断当时的 UTC 偏移和夏令时状态。结果显示在照片的“元数据详情”中。
+
+这项信息与自动修复推断完全解耦：不会改变照片分类、目标偏移、默认勾选或写入内容。若参考时间距离时区偏移变更不足 24 小时，或落入夏令时回拨的重复时段、拨快的跳过时段，列表会显示黄色标签，并建议人工核对。
+
+GPS 边界查询使用 [tzf](https://github.com/ringsaturn/tzf)；其边界数据来自 [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) 和 OpenStreetMap 贡献者，数据依 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 提供。默认简化边界在时区交界附近可能存在约百米级误差，因此所有 GPS 推算均只作为参考。
+
 ## 备份与验证
 
 程序对每张待修照片执行：
@@ -111,7 +122,7 @@ CreateDate             2025:10:01 13:39:15  +09:00
 审计标记示例：
 
 ```text
-LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.4.0; repaired-at=2026-01-01T12:00:00+08:00
+LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+01:00; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=1.5.0; repaired-at=2026-01-01T12:00:00+08:00
 ```
 
 ## 恢复照片
@@ -190,6 +201,12 @@ go-winres make --arch amd64 --out rsrc
 源码、`go.mod`、`go.sum`、README 和内嵌前端应提交到仓库；正式 EXE 建议作为 GitHub Release 附件发布，而不是直接提交进 Git。
 
 ## 版本记录
+
+### 1.5.0
+
+- 新增完全离线的 GPS 地理时区参考，显示 IANA 时区、参考当地时间、UTC 偏移和夏令时状态。
+- 在时区偏移变更前后 24 小时以及重复/跳过的当地时间段显示人工核对警告，并在照片列表增加黄色提示标签。
+- 完整处理无 GPS、无效坐标、缺少日期和边界查询失败等情况；GPS 结果不参与自动修复判断。
 
 ### 1.4.0
 

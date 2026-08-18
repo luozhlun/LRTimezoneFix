@@ -183,6 +183,33 @@ function filteredFiles() {
   });
 }
 
+function renderGPSWarningBadge(file) {
+  return file.gpsTimezoneReference?.needsManualReview
+    ? '<span class="timezone-warning-chip" title="临近时区规则变更或当地时间存在歧义，建议打开详情人工核对">时区变更临近</span>'
+    : '';
+}
+
+function renderGPSReference(file) {
+  const gps = file.gpsTimezoneReference || {status: 'missing_gps', note: '照片未提供可用的 GPS 坐标。'};
+  if (gps.status !== 'available') {
+    return `<section class="detail-block"><h3>GPS 时区参考</h3>
+      <div class="gps-reference-box unavailable"><strong>${gps.status === 'missing_gps' ? '未提供 GPS' : '无法推算'}</strong><span>${escapeHTML(gps.note || '没有足够的 GPS 或日期信息。')}</span></div>
+    </section>`;
+  }
+  return `<section class="detail-block"><h3>GPS 时区参考</h3>
+    <div class="gps-reference-box${gps.needsManualReview ? ' warning' : ''}">
+      <div class="metadata-row"><span>坐标</span><span>${escapeHTML(gps.coordinates)}</span></div>
+      <div class="metadata-row"><span>地理时区</span><span>${escapeHTML(gps.timezone)}</span></div>
+      <div class="metadata-row"><span>参考当地时间</span><span>${escapeHTML(gps.referenceTime)}</span></div>
+      <div class="metadata-row"><span>日期依据</span><span>${escapeHTML(gps.dateSource)}</span></div>
+      <div class="metadata-row"><span>当时 UTC 偏移</span><span>${escapeHTML(gps.offset)}</span></div>
+      <div class="metadata-row"><span>夏令时</span><span>${escapeHTML(gps.dstLabel)}</span></div>
+      ${gps.warning ? `<div class="timezone-warning"><strong>建议人工核对</strong><span>${escapeHTML(gps.warning)}</span></div>` : ''}
+      <p>${escapeHTML(gps.note || 'GPS 推算仅供参考，不参与自动修复判断。')} 边界数据来自 timezone-boundary-builder / OpenStreetMap 贡献者（ODbL）。</p>
+    </div>
+  </section>`;
+}
+
 function renderRows() {
   const files = filteredFiles();
   el('visibleCount').textContent = `${files.length} 张`;
@@ -197,7 +224,7 @@ function renderRows() {
     return `<tr data-index="${file.index}">
       <td class="check-col">${checkbox}</td>
       <td class="thumb-col"><div class="photo-thumb"><span>JPG</span><img class="thumb-image" data-index="${file.index}" alt="" decoding="async"></div></td>
-      <td class="file-cell"><div class="file-name" title="${escapeHTML(file.displayName)}">${escapeHTML(file.displayName)}</div><div class="file-path">${escapeHTML(file.reason || file.path)}</div></td>
+      <td class="file-cell"><div class="file-name-row"><div class="file-name" title="${escapeHTML(file.displayName)}">${escapeHTML(file.displayName)}</div>${renderGPSWarningBadge(file)}</div><div class="file-path">${escapeHTML(file.reason || file.path)}</div></td>
       <td class="reveal-col"><button class="reveal-button" type="button" data-index="${file.index}" title="在资源管理器中显示" aria-label="在资源管理器中显示 ${escapeHTML(file.displayName)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2Z"/><path d="M2 10h20"/></svg></button></td>
       <td class="mono">${escapeHTML(time)}</td>
       <td>${offset}</td>
@@ -305,6 +332,7 @@ function openDrawer(index) {
       <div class="metadata-row"><span>CreateDate</span><span>${escapeHTML(file.createDate || '—')} ${escapeHTML(file.offsetTimeDigitized || '')}</span></div>
       <div class="metadata-row"><span>墙上时间变化</span><span>${escapeHTML(file.repairable ? file.shift : '—')}</span></div>
     </section>
+    ${renderGPSReference(file)}
     ${file.repairable ? `<section class="detail-block"><h3>计划修复</h3><div class="target-box"><strong>${escapeHTML(target)}</strong><span>两组时间与关联 EXIF/XMP/IPTC 将统一；UTC 时刻保持不变。</span></div></section>` : ''}
     <section class="detail-block"><h3>判断说明</h3><div class="reason-box">${escapeHTML(file.reason || '字段时间一致，无需处理。')}</div></section>`;
   el('detailDrawer').classList.add('open');
