@@ -90,6 +90,20 @@ func TestNearestOffsetTransitionHonoursWindow(t *testing.T) {
 	}
 }
 
+func TestLoadTimezoneLocationCachesRules(t *testing.T) {
+	first, err := loadTimezoneLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadTimezoneLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("timezone rules were loaded more than once")
+	}
+}
+
 func TestDecodeMetadataIncludesSignedCompositeGPS(t *testing.T) {
 	m := decodeMetadata(map[string]any{
 		"Composite:GPSLatitude":  -33.8688,

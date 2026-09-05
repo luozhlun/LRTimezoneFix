@@ -139,6 +139,12 @@ func readMetadataBatchWithProgress(exifTool string, files []string, progress fun
 }
 
 func readMetadataBatchWithProgressContext(ctx context.Context, exifTool string, files []string, progress func(done, total int)) (map[string]metadata, map[string]error, error) {
+	if err := ctx.Err(); err != nil {
+		return make(map[string]metadata), make(map[string]error), err
+	}
+	if len(files) == 0 {
+		return make(map[string]metadata), make(map[string]error), nil
+	}
 	runner := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
 	session, err := newExifToolSession(exifTool)
 	if err == nil {
@@ -165,6 +171,9 @@ func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, pro
 
 	done := 0
 	const batchSize = 16
+	// The read arguments are immutable across batches; avoid rebuilding this
+	// fixed list for every group of files.
+	args := metadataReadArguments()
 	for dir, group := range byDirectory {
 		for start := 0; start < len(group); start += batchSize {
 			if err := ctx.Err(); err != nil {
@@ -172,7 +181,6 @@ func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, pro
 			}
 			end := min(start+batchSize, len(group))
 			batch := group[start:end]
-			args := metadataReadArguments()
 			names := make([]string, 0, len(batch))
 			for _, file := range batch {
 				names = append(names, filepath.Base(file))

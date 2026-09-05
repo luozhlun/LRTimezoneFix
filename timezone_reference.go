@@ -36,6 +36,9 @@ var (
 	timezoneFinderOnce sync.Once
 	timezoneFinder     tzf.F
 	timezoneFinderErr  error
+	// tzf returns names from its finite timezone dataset; locations are immutable
+	// after loading, so successful rules can be shared across photos.
+	timezoneLocations sync.Map
 )
 
 func analyzePhotoMetadata(file string, m metadata) analysisResult {
@@ -73,7 +76,7 @@ func buildGPSTimezoneReference(m metadata, result analysisResult) GPSTimezoneRef
 		ref.Note = "未能从该 GPS 坐标确定地理时区。"
 		return ref
 	}
-	location, err := time.LoadLocation(timezoneName)
+	location, err := loadTimezoneLocation(timezoneName)
 	if err != nil {
 		ref.Status = "lookup_failed"
 		ref.Note = "已找到地理时区，但无法加载其历史规则。"
@@ -136,6 +139,18 @@ func getTimezoneFinder() (tzf.F, error) {
 		timezoneFinder, timezoneFinderErr = tzf.NewDefaultFinder()
 	})
 	return timezoneFinder, timezoneFinderErr
+}
+
+func loadTimezoneLocation(name string) (*time.Location, error) {
+	if cached, ok := timezoneLocations.Load(name); ok {
+		return cached.(*time.Location), nil
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := timezoneLocations.LoadOrStore(name, location)
+	return actual.(*time.Location), nil
 }
 
 func timezoneReferenceTime(m metadata, result analysisResult, location *time.Location) (time.Time, time.Time, string, string, error) {

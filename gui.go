@@ -26,13 +26,16 @@ import (
 var frontendAssets embed.FS
 
 const progressEvent = "lrtimezonefix:progress"
+const guiProgressInterval = 100 * time.Millisecond
 
 type GUIApp struct {
 	ctx              context.Context
 	mu               sync.Mutex
 	busy             bool
+	closed           bool
 	scanCancel       context.CancelFunc
 	sessions         map[string]*guiSession
+	progress         guiProgressGate
 	thumbnailMu      sync.Mutex
 	thumbnailSession *exifToolSession
 }
@@ -117,12 +120,41 @@ type GUIProgress struct {
 	Message string `json:"message"`
 }
 
+type guiProgressGate struct {
+	mu      sync.Mutex
+	last    GUIProgress
+	lastAt  time.Time
+	hasLast bool
+}
+
+func (g *guiProgressGate) allow(progress GUIProgress, at time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	allowed := !g.hasLast ||
+		progress.Phase != g.last.Phase ||
+		progress.Total != g.last.Total ||
+		progress.Done < g.last.Done ||
+		(progress.Total > 0 && progress.Done >= progress.Total) ||
+		at.Sub(g.lastAt) >= guiProgressInterval
+	if !allowed {
+		return false
+	}
+	g.last = progress
+	g.lastAt = at
+	g.hasLast = true
+	return true
+}
+
 func newGUIApp() *GUIApp {
 	return &GUIApp{sessions: make(map[string]*guiSession)}
 }
 
 func (a *GUIApp) startup(ctx context.Context) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.ctx = ctx
+	a.closed = false
 }
 
 func runGUI() error {
@@ -164,6 +196,16 @@ func (a *GUIApp) GetAppInfo() AppInfo {
 }
 
 func (a *GUIApp) shutdown(context.Context) {
+	a.mu.Lock()
+	cancel := a.scanCancel
+	a.scanCancel = nil
+	a.sessions = nil
+	a.closed = true
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+
 	a.thumbnailMu.Lock()
 	session := a.thumbnailSession
 	a.thumbnailSession = nil
@@ -188,6 +230,7 @@ func (a *GUIApp) GetThumbnail(sessionID string, index int) (string, error) {
 	}
 	stdout, stderr, err := session.RunFiles(filepath.Dir(file), []string{filepath.Base(file)}, "-j", "-b", "-ThumbnailImage")
 	if err != nil {
+		a.invalidateThumbnailSession(session)
 		return "", fmt.Errorf("读取 EXIF 缩略图失败：%v；%s", err, strings.TrimSpace(stderr))
 	}
 	var rows []struct {
@@ -241,6 +284,15 @@ func (a *GUIApp) getThumbnailSession(exifTool string) (*exifToolSession, error) 
 	}
 	a.thumbnailSession = session
 	return session, nil
+}
+
+func (a *GUIApp) invalidateThumbnailSession(session *exifToolSession) {
+	a.thumbnailMu.Lock()
+	if a.thumbnailSession == session {
+		a.thumbnailSession = nil
+	}
+	a.thumbnailMu.Unlock()
+	_ = session.Close()
 }
 
 func (a *GUIApp) ChooseFolder() (GUISelection, error) {
@@ -304,9 +356,10 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, errors.New("所选范围内没有找到 JPG/JPEG 文件")
 	}
 
-	a.emitProgress("scan", 0, len(files), fmt.Sprintf("正在读取 %d 张照片的元数据", len(files)))
+	progressTotal := len(files) * 2
+	a.emitProgress("scan", 0, progressTotal, fmt.Sprintf("正在读取 %d 张照片的元数据", len(files)))
 	allMetadata, readErrors, err := readMetadataBatchWithProgressContext(scanCtx, exifTool, files, func(done, total int) {
-		a.emitProgress("scan", done, total, fmt.Sprintf("已分析 %d / %d", done, total))
+		a.emitProgress("scan", done, progressTotal, fmt.Sprintf("已读取 %d / %d", done, total))
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -315,8 +368,9 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, err
 	}
 
+	a.emitProgress("scan", len(files), progressTotal, fmt.Sprintf("正在分析 %d 张照片的时区信息", len(files)))
 	results := make([]analysisResult, 0, len(files))
-	for _, file := range files {
+	for index, file := range files {
 		if scanCtx.Err() != nil {
 			return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
 		}
@@ -327,17 +381,25 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		}
 		if readErr != nil {
 			results = append(results, analysisResult{File: file, State: stateUnreadable, Reason: readErr.Error()})
-			continue
+		} else {
+			results = append(results, analyzePhotoMetadata(file, meta))
 		}
-		results = append(results, analyzePhotoMetadata(file, meta))
+		a.emitProgress("scan", len(files)+index+1, progressTotal, fmt.Sprintf("已分析 %d / %d", index+1, len(files)))
+	}
+	if scanCtx.Err() != nil {
+		return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
 	}
 
 	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
 	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
+	}
 	a.sessions = map[string]*guiSession{sessionID: {Root: root, Results: results}}
 	a.mu.Unlock()
 	report := buildGUIScanReport(sessionID, root, exifTool, results)
-	a.emitProgress("scan", len(files), len(files), "扫描完成")
+	a.emitProgress("scan", progressTotal, progressTotal, "扫描完成")
 	return report, nil
 }
 
@@ -407,6 +469,9 @@ func (a *GUIApp) Repair(request GUIRepairRequest) (GUIRepairReport, error) {
 func (a *GUIApp) beginOperation() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closed {
+		return errors.New("应用已经关闭")
+	}
 	if a.busy {
 		return errors.New("另一个操作正在进行，请稍候")
 	}
@@ -417,10 +482,17 @@ func (a *GUIApp) beginOperation() error {
 func (a *GUIApp) beginScanOperation() (context.Context, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closed {
+		return nil, errors.New("应用已经关闭")
+	}
 	if a.busy {
 		return nil, errors.New("另一个操作正在进行，请稍候")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	baseCtx := a.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(baseCtx)
 	a.busy = true
 	a.scanCancel = cancel
 	return ctx, nil
@@ -449,10 +521,15 @@ func (a *GUIApp) endOperation() {
 }
 
 func (a *GUIApp) emitProgress(phase string, done, total int, message string) {
-	if a.ctx == nil {
+	ctx := a.ctx
+	if ctx == nil {
 		return
 	}
-	wailsruntime.EventsEmit(a.ctx, progressEvent, GUIProgress{Phase: phase, Done: done, Total: total, Message: message})
+	progress := GUIProgress{Phase: phase, Done: done, Total: total, Message: message}
+	if !a.progress.allow(progress, time.Now()) {
+		return
+	}
+	wailsruntime.EventsEmit(ctx, progressEvent, progress)
 }
 
 func resolveGUISelection(selection GUISelection) ([]string, string, error) {
@@ -559,7 +636,13 @@ func validateRepairIndices(results []analysisResult, input []int) ([]int, error)
 }
 
 func buildGUIScanReport(sessionID, root, exifTool string, results []analysisResult) GUIScanReport {
-	report := GUIScanReport{SessionID: sessionID, Root: root, ExifTool: exifTool}
+	report := GUIScanReport{
+		SessionID: sessionID,
+		Root:      root,
+		ExifTool:  exifTool,
+		Summary:   GUISummary{Total: len(results)},
+		Files:     make([]GUIFileResult, len(results)),
+	}
 	for index, result := range results {
 		item := GUIFileResult{
 			Index:          index,
@@ -578,8 +661,7 @@ func buildGUIScanReport(sessionID, root, exifTool string, results []analysisResu
 			Shift:          formatSignedMinutes(result.ShiftMinutes),
 			GPSReference:   result.GPSReference,
 		}
-		report.Files = append(report.Files, item)
-		report.Summary.Total++
+		report.Files[index] = item
 		switch result.State {
 		case stateInitialResidue, stateMarkerMaintenance:
 			report.Summary.Candidates++

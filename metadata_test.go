@@ -42,6 +42,18 @@ func TestFindJPEGsHonoursCancellation(t *testing.T) {
 	}
 }
 
+func TestReadMetadataBatchHonoursCancellationBeforeEmptyScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results, failures, err := readMetadataBatchWithProgressContext(ctx, "missing-exiftool", nil, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if results == nil || failures == nil {
+		t.Fatal("cancelled metadata scan must return initialized result maps")
+	}
+}
+
 func baseTestMetadata() metadata {
 	return metadata{
 		DateTimeOriginal:       "2025:10:01 13:39:15",
