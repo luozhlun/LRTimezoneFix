@@ -4,6 +4,7 @@ const FRONTEND_VERSION = '1.6.0';
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 180;
 const THUMBNAIL_CONCURRENCY = 2;
+const THUMBNAIL_CACHE_LIMIT = 300;
 
 const state = {
   selection: null,
@@ -88,6 +89,19 @@ function isThumbnailTaskCurrent(task, current) {
     task.index === current.index &&
     current.connected
   );
+}
+
+function cacheThumbnail(cache, key, data) {
+  if (!cache.has(key) && cache.size >= THUMBNAIL_CACHE_LIMIT) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, data || '');
+}
+
+function cacheThumbnailForSession(cache, key, data, taskSessionId, currentSessionId) {
+  if (!taskSessionId || taskSessionId !== currentSessionId) return false;
+  cacheThumbnail(cache, key, data);
+  return true;
 }
 
 function debounce(callback, delay = SEARCH_DEBOUNCE_MS) {
@@ -569,7 +583,7 @@ async function loadThumbnailTask(task) {
       data = state.thumbnailCache.get(key);
     } else {
       data = await api().GetThumbnail(task.sessionId, task.index);
-      state.thumbnailCache.set(key, data || '');
+      cacheThumbnailForSession(state.thumbnailCache, key, data, task.sessionId, state.report?.sessionId);
     }
     if (!isThumbnailTaskCurrent(task, current()) || !data) return;
     image.addEventListener('load', () => image.closest('.photo-thumb')?.classList.add('loaded'), {once: true});
@@ -758,6 +772,9 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     FRONTEND_VERSION,
     PAGE_SIZE,
+    THUMBNAIL_CACHE_LIMIT,
+    cacheThumbnail,
+    cacheThumbnailForSession,
     debounce,
     fileMatchesFilter,
     filterFiles,

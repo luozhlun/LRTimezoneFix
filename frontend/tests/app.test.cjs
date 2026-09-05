@@ -8,6 +8,9 @@ global.window = {
 const {
   FRONTEND_VERSION,
   PAGE_SIZE,
+  THUMBNAIL_CACHE_LIMIT,
+  cacheThumbnail,
+  cacheThumbnailForSession,
   debounce,
   filterFiles,
   isThumbnailTaskCurrent,
@@ -56,6 +59,17 @@ async function main() {
   assert.equal(isThumbnailTaskCurrent(task, {...task, generation: 3, connected: true}), false, '过期渲染任务必须丢弃');
   assert.equal(isThumbnailTaskCurrent(task, {...task, sessionId: 'session-b', connected: true}), false);
   assert.equal(isThumbnailTaskCurrent(task, {...task, connected: false}), false);
+
+  const thumbnailCache = new Map();
+  for (let index = 0; index < THUMBNAIL_CACHE_LIMIT; index += 1) {
+    cacheThumbnail(thumbnailCache, `session-a:${index}`, `data-${index}`);
+  }
+  assert.equal(thumbnailCache.size, 300, '缩略图缓存上限应为 300 条');
+  assert.equal(cacheThumbnailForSession(thumbnailCache, 'session-old:1', 'old-data', 'session-old', 'session-new'), false);
+  assert.equal(thumbnailCache.has('session-old:1'), false, '旧 session 异步返回不能污染新 session 缓存');
+  assert.equal(cacheThumbnailForSession(thumbnailCache, 'session-new:301', 'new-data', 'session-new', 'session-new'), true);
+  assert.equal(thumbnailCache.size, 300);
+  assert.equal(thumbnailCache.has('session-a:0'), false, '超出上限时应淘汰最早的缓存项');
 
   let calls = [];
   const debounced = debounce((value) => calls.push(value), 20);
