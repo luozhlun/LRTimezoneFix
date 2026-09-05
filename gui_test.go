@@ -111,6 +111,15 @@ func TestGUIAppShutdownCancelsScanAndDropsSession(t *testing.T) {
 	}
 }
 
+func TestGUIAppClosedDoesNotStartThumbnailSession(t *testing.T) {
+	app := newGUIApp()
+	app.shutdown(context.Background())
+
+	if _, err := app.getThumbnailSession("missing-exiftool-after-shutdown"); err == nil || err.Error() != "应用已经关闭" {
+		t.Fatalf("closed app attempted to create thumbnail session: %v", err)
+	}
+}
+
 func TestBuildGUIScanReportPreallocatesFiles(t *testing.T) {
 	results := []analysisResult{
 		{File: "consistent.jpg", State: stateConsistent},

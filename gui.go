@@ -275,6 +275,14 @@ func (a *GUIApp) sessionFile(sessionID string, index int) (string, error) {
 func (a *GUIApp) getThumbnailSession(exifTool string) (*exifToolSession, error) {
 	a.thumbnailMu.Lock()
 	defer a.thumbnailMu.Unlock()
+	// Keep thumbnailMu before mu. shutdown releases mu before acquiring
+	// thumbnailMu, so this ordering cannot deadlock with shutdown.
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return nil, errors.New("应用已经关闭")
+	}
 	if a.thumbnailSession != nil {
 		return a.thumbnailSession, nil
 	}
