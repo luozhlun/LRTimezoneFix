@@ -270,6 +270,7 @@ async function choose(mode) {
     updateWorkflow();
     updateSelectedCount();
     closeDrawer();
+    setBusy(false);
   } catch (error) {
     handleOperationError(error);
   }
@@ -385,6 +386,7 @@ function renderReport() {
   updateWorkflow();
   renderRows();
   updateSelectedCount();
+  el('resultsSection').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 function filteredFiles() {
