@@ -11,24 +11,31 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">TZ</div>
+        <img class="brand-mark" src="appicon.svg" alt="">
         <div>
           <div class="brand-title">LRTimezoneFix</div>
           <div class="brand-subtitle">Lightroom 导出 JPG 时区修复</div>
         </div>
       </div>
       <div class="topbar-meta">
-        <span id="versionBadge" class="version-badge">v1.4.0</span>
+        <span id="versionBadge" class="version-badge">v1.6.0</span>
         <span id="exifStatus" class="status-pill waiting"><span class="status-dot"></span>正在检查 ExifTool</span>
       </div>
     </header>
 
     <main class="workspace">
       <section class="source-card">
+        <div class="workflow-steps" aria-label="工作流程">
+          <div class="workflow-step active"><span>1</span><div><strong>选择照片</strong><small>文件夹或 JPG</small></div></div>
+          <div class="workflow-line" aria-hidden="true"></div>
+          <div class="workflow-step"><span>2</span><div><strong>分析时间</strong><small>只读读取元数据</small></div></div>
+          <div class="workflow-line" aria-hidden="true"></div>
+          <div class="workflow-step"><span>3</span><div><strong>确认修复</strong><small>备份后安全写入</small></div></div>
+        </div>
         <div class="source-copy">
           <span class="eyebrow">扫描范围</span>
           <h1>选择要检查的照片</h1>
-          <p>可以递归扫描一个文件夹，也可以只选择几张 JPG/JPEG。扫描阶段完全只读。</p>
+          <p>递归扫描一个文件夹，或只选择几张 JPG/JPEG。扫描阶段完全只读，修复前会保留备份。</p>
         </div>
         <div class="source-actions">
           <button id="folderButton" class="button secondary" type="button">
@@ -50,6 +57,14 @@
         </div>
       </section>
 
+      <section id="exifToolNotice" class="tool-notice hidden" aria-live="assertive">
+        <div class="tool-notice-copy">
+          <span class="tool-notice-icon" aria-hidden="true">!</span>
+          <div><strong>ExifTool 尚未就绪</strong><span id="exifToolMessage">请确认 ExifTool 已安装后重试。</span></div>
+        </div>
+        <button id="retryExifButton" class="button secondary" type="button">重试检查</button>
+      </section>
+
       <section id="progressPanel" class="progress-panel hidden" aria-live="polite">
         <div class="progress-copy">
           <strong id="progressTitle">正在扫描</strong>
@@ -64,10 +79,18 @@
 
       <section id="resultsSection" class="results-section hidden">
         <div class="summary-grid">
-          <article class="summary-card total"><span>扫描文件</span><strong id="totalCount">0</strong></article>
-          <article class="summary-card candidate"><span>需要修复</span><strong id="candidateCount">0</strong></article>
-          <article class="summary-card consistent"><span>时间一致</span><strong id="consistentCount">0</strong></article>
-          <article class="summary-card attention"><span>需人工检查</span><strong id="attentionCount">0</strong></article>
+          <button class="summary-card total quick-filter active" data-filter="all" type="button" aria-pressed="false">
+            <span>扫描文件</span><strong id="totalCount">0</strong><small>查看全部结果</small>
+          </button>
+          <button class="summary-card candidate quick-filter" data-filter="candidate" type="button" aria-pressed="false">
+            <span>需要修复</span><strong id="candidateCount">0</strong><small>快捷筛选候选</small>
+          </button>
+          <button class="summary-card consistent quick-filter" data-filter="consistent" type="button" aria-pressed="false">
+            <span>时间一致</span><strong id="consistentCount">0</strong><small>无需修改</small>
+          </button>
+          <button class="summary-card attention quick-filter" data-filter="attention" type="button" aria-pressed="false">
+            <span>需人工检查</span><strong id="attentionCount">0</strong><small>打开详情核对</small>
+          </button>
         </div>
 
         <div class="results-card">
@@ -91,8 +114,12 @@
           </div>
 
           <div class="select-row">
-            <label class="check-label"><input id="selectAllCandidates" type="checkbox">选择当前显示的可修复照片</label>
-            <span id="visibleCount">0 张</span>
+            <label class="check-label"><input id="selectAllCandidates" type="checkbox">选择本页可修复照片</label>
+            <div class="selection-meta">
+              <span id="visibleCount">匹配 0 张</span>
+              <span id="selectionHint" class="selection-hint hidden" aria-live="polite"></span>
+              <button id="clearSelectionButton" class="clear-selection" type="button" disabled>清除全部选择</button>
+            </div>
           </div>
 
           <div id="tableWrap" class="table-wrap">
@@ -102,8 +129,22 @@
               </thead>
               <tbody id="resultsBody"></tbody>
             </table>
-            <div id="emptyResults" class="empty-results hidden">没有符合当前筛选条件的照片</div>
+            <div id="emptyResults" class="empty-results hidden">
+              <span class="empty-results-icon" aria-hidden="true">⌕</span>
+              <strong>没有符合当前筛选条件的照片</strong>
+              <span>试试切换摘要筛选，或清空搜索词。</span>
+            </div>
           </div>
+          <nav id="pagination" class="pagination hidden" aria-label="照片分页">
+            <button id="previousPageButton" type="button" aria-label="上一页">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <span id="pageStatus">第 1 / 1 页</span>
+            <button id="nextPageButton" type="button" aria-label="下一页">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <small>每页最多 100 张</small>
+          </nav>
         </div>
       </section>
     </main>
@@ -120,9 +161,9 @@
     </footer>
   </div>
 
-  <aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+  <aside id="detailDrawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detailName" aria-hidden="true">
     <button id="drawerBackdrop" class="drawer-backdrop" aria-label="关闭详情"></button>
-    <div class="drawer-panel">
+    <div class="drawer-panel" tabindex="-1">
       <div class="drawer-head">
         <div><span class="eyebrow">元数据详情</span><h2 id="detailName">照片</h2></div>
         <button id="closeDrawer" class="icon-button" aria-label="关闭">×</button>
