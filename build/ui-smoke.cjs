@@ -31,7 +31,7 @@ const path = require('node:path');
       }));
       window.runtime = { EventsOn() {} };
       window.go = { main: { GUIApp: {
-        GetAppInfo: async () => ({ version: '2.1.0', exifToolReady: true }),
+        GetAppInfo: async () => ({ version: '2.1.1', exifToolReady: true }),
         ChooseFolder: async () => ({ mode: 'folder', root: 'D:\\Photos' }),
         Scan: async () => ({ sessionId: 'smoke', files,
           summary: { total: files.length, candidates: files.length, consistent: 0, ambiguous: 0, unreadable: 0 } }),

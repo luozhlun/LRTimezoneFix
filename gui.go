@@ -369,7 +369,7 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, errors.New("所选范围内没有找到 JPG/JPEG/XMP 文件")
 	}
 
-	progressTotal := len(files) * 2
+	progressTotal := len(files)
 	a.emitProgress("scan", 0, progressTotal, fmt.Sprintf("正在读取 %d 个文件的元数据", len(files)))
 	allMetadata, readErrors, err := readMetadataBatchWithProgressContext(scanCtx, exifTool, files, func(done, total int) {
 		a.emitProgress("scan", done, progressTotal, fmt.Sprintf("已读取 %d / %d", done, total))
@@ -381,9 +381,9 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, err
 	}
 
-	a.emitProgress("scan", len(files), progressTotal, fmt.Sprintf("正在分析 %d 个文件的时区信息", len(files)))
+	a.emitProgress("analyze", 0, 0, fmt.Sprintf("读取完成，正在分析 %d 个文件的时区信息", len(files)))
 	results := make([]analysisResult, 0, len(files))
-	for index, file := range files {
+	for _, file := range files {
 		if scanCtx.Err() != nil {
 			return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")
 		}
@@ -397,7 +397,6 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		} else {
 			results = append(results, analyzePhotoMetadata(file, meta))
 		}
-		a.emitProgress("scan", len(files)+index+1, progressTotal, fmt.Sprintf("已分析 %d / %d", index+1, len(files)))
 	}
 	if scanCtx.Err() != nil {
 		return GUIScanReport{}, errors.New("扫描已终止；未修改任何文件")

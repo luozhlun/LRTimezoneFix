@@ -27,7 +27,7 @@ async function main() {
     }));
   }
 
-  assert.equal(FRONTEND_VERSION, '2.1.0');
+  assert.equal(FRONTEND_VERSION, '2.1.1');
   assert.equal(PAGE_SIZE, 100);
 
   const files = makeFiles(10000);
