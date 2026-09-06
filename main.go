@@ -13,7 +13,7 @@ import (
 
 const (
 	appName       = "LRTimezoneFix"
-	version       = "1.6.0"
+	version       = "2.0.0"
 	backupPrefix  = "ExifTool_Backup_"
 	auditPrefix   = "LRTimezoneFix/1;"
 	defaultMarker = "timezone-normalize"
@@ -82,16 +82,16 @@ func run(opts options) error {
 	}
 
 	fmt.Printf("%s %s\n", appName, version)
-	fmt.Println("Lightroom 导出 JPG 时区检查与修复工具")
+	fmt.Println("Lightroom JPG / XMP 时区检查与修复工具")
 	fmt.Printf("扫描目录：%s\n", root)
 	fmt.Printf("ExifTool：%s\n\n", exifTool)
 
-	files, err := findJPEGs(root)
+	files, err := findSupportedFiles(root)
 	if err != nil {
-		return fmt.Errorf("枚举 JPG 失败：%w", err)
+		return fmt.Errorf("枚举文件失败：%w", err)
 	}
 	if len(files) == 0 {
-		fmt.Println("没有找到 JPG/JPEG 文件。")
+		fmt.Println("没有找到 JPG/JPEG/XMP 文件。")
 		return nil
 	}
 
@@ -130,10 +130,11 @@ func run(opts options) error {
 
 	fmt.Println("\n修复将执行以下操作：")
 	fmt.Println("  1. 将 DateTimeOriginal 与 CreateDate 两组时间统一为目标当地时间和时区")
-	fmt.Println("  2. 同步 EXIF、XMP、IPTC，并刷新 Photoshop IPTCDigest")
-	fmt.Printf("  3. 在 EXIF UserComment 写入 %s 审计标记\n", auditPrefix)
-	fmt.Printf("  4. 在每个照片目录建立 %sYYYYMMDD_HHMMSS 备份目录\n", backupPrefix)
-	fmt.Println("  5. 验证图像数据哈希、时间字段、摘要和审计标记")
+	fmt.Println("  2. JPG 同步 EXIF、XMP、IPTC；XMP 仅同步三个拍摄时间字段")
+	fmt.Printf("  3. JPG 在 EXIF UserComment 写入 %s 审计标记\n", auditPrefix)
+	fmt.Printf("  4. 在每个文件目录建立 %sYYYYMMDD_HHMMSS 备份目录\n", backupPrefix)
+	fmt.Println("  5. 验证时间字段；JPG 另验证图像数据、摘要和审计标记")
+	fmt.Println("  XMP 修复后，请在 Lightroom 中执行“从文件读取元数据”，同步目录后再导出。")
 
 	if !opts.yes && !confirm("\n修复上面列出的全部文件？输入 y 确认：") {
 		fmt.Println("已取消；未修改任何内容。")
@@ -192,11 +193,11 @@ func resolveRoot(root string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-func findJPEGs(root string) ([]string, error) {
-	return findJPEGsWithContext(context.Background(), root, nil)
+func findSupportedFiles(root string) ([]string, error) {
+	return findSupportedFilesWithContext(context.Background(), root, nil)
 }
 
-func findJPEGsWithContext(ctx context.Context, root string, progress func(visited, found int)) ([]string, error) {
+func findSupportedFilesWithContext(ctx context.Context, root string, progress func(visited, found int)) ([]string, error) {
 	var files []string
 	visited := 0
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -220,7 +221,7 @@ func findJPEGsWithContext(ctx context.Context, root string, progress func(visite
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if ext == ".jpg" || ext == ".jpeg" {
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".xmp" {
 			files = append(files, path)
 		}
 		if progress != nil && (visited == 1 || visited%500 == 0) {

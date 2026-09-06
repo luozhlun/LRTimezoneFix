@@ -78,6 +78,15 @@ func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candida
 		"-EXIF:UserComment=" + comment,
 		"-Photoshop:IPTCDigest=new",
 	}
+	if isXMP(file) {
+		args = []string{
+			"-overwrite_original_in_place", "-P",
+			"-XMP-x:XMPToolkit<XMP-x:XMPToolkit",
+			"-XMP-exif:DateTimeOriginal=" + target,
+			"-XMP-xmp:CreateDate=" + target,
+			"-XMP-photoshop:DateCreated=" + target,
+		}
+	}
 	_, stderr, writeErr := runExifToolForFiles(exifTool, filepath.Dir(file), []string{filepath.Base(file)}, args...)
 	if writeErr != nil {
 		return fmt.Errorf("ExifTool 写入失败：%v；%s", writeErr, strings.TrimSpace(stderr))
@@ -90,7 +99,11 @@ func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candida
 	if err := verifyRepair(*candidate, after, marker); err != nil {
 		return err
 	}
-	if err := appendBackupLogResult(backupDir, file, "REPAIR_VERIFIED", "元数据、摘要和 JPEG 图像数据验证通过", time.Now()); err != nil {
+	detail := "元数据、摘要和 JPEG 图像数据验证通过"
+	if isXMP(file) {
+		detail = "XMP 三个拍摄时间字段验证通过；请在 Lightroom 中从文件读取元数据"
+	}
+	if err := appendBackupLogResult(backupDir, file, "REPAIR_VERIFIED", detail, time.Now()); err != nil {
 		return fmt.Errorf("无法更新备份日志：%w", err)
 	}
 
@@ -111,7 +124,7 @@ func appendBackupLogEntry(backupDir, sourcePath, backupPath string, sourceHash [
 	}
 	var text strings.Builder
 	if info.Size() == 0 {
-		fmt.Fprintf(&text, "LRTimezoneFix Backup Log\nLogFormat=1\nToolVersion=%s\nBatchTime=%s\nPurpose=修复 Lightroom 导出 JPG 的时区残留；本目录保存修改前原文件。\nRestore=如需恢复，请关闭可能占用照片的软件，将备份 JPG 复制回 OriginalPath 并覆盖。\n\n", version, batchTime.Format(time.RFC3339))
+		fmt.Fprintf(&text, "LRTimezoneFix Backup Log\nLogFormat=1\nToolVersion=%s\nBatchTime=%s\nPurpose=修复 Lightroom JPG / XMP 的时区残留；本目录保存修改前原文件。\nRestore=如需恢复，请关闭可能占用照片的软件，将备份文件复制回 OriginalPath 并覆盖。\n\n", version, batchTime.Format(time.RFC3339))
 	}
 	fmt.Fprintf(&text, "[Backup]\nFileName=%s\nOriginalPath=%s\nBackupPath=%s\nOriginalSHA256=%x\nSourceOffset=%s\nTargetOffset=%s\nWallShift=%s\nTargetLocal=%s\nBackupState=VERIFIED\n\n",
 		filepath.Base(sourcePath), sourcePath, backupPath, sourceHash, candidate.SourceOffset, candidate.TargetOffset, formatSignedMinutes(candidate.ShiftMinutes), candidate.TargetLocal)
@@ -178,6 +191,9 @@ func formatSignedMinutes(minutes int) string {
 }
 
 func verifyRepair(before analysisResult, after metadata, marker string) error {
+	if isXMP(before.File) {
+		return verifyXMPRepair(before, after)
+	}
 	dto, err := parseExifDate(firstNonEmpty(after.SubSecDateTimeOriginal, after.DateTimeOriginal))
 	if err != nil {
 		return fmt.Errorf("验证失败：%w", err)

@@ -16,6 +16,8 @@ import (
 )
 
 type metadata struct {
+	FileType               string
+	XMPDateTimeOriginal    string
 	DateTimeOriginal       string
 	CreateDate             string
 	ModifyDate             string
@@ -229,6 +231,8 @@ func metadataReadArguments() []string {
 	return []string{
 		"-j", "-G1", "-s", "-n", "-a",
 		"-api", "RequestAll=3",
+		"-File:FileType",
+		"-XMP-exif:DateTimeOriginal",
 		"-ExifIFD:DateTimeOriginal",
 		"-ExifIFD:CreateDate",
 		"-IFD0:ModifyDate",
@@ -255,6 +259,9 @@ func metadataReadArguments() []string {
 		"-Composite:GPSDateTime",
 		"-Composite:GPSLatitude",
 		"-Composite:GPSLongitude",
+		"-XMP-exif:GPSLatitude",
+		"-XMP-exif:GPSLongitude",
+		"-XMP-exif:GPSDateTime",
 		"-ExifIFD:UserComment",
 		"-Photoshop:IPTCDigest",
 		"-File:CurrentIPTCDigest",
@@ -297,7 +304,9 @@ func decodeMetadata(m map[string]any) metadata {
 	mainOriginal := getString(m, "ExifIFD:DateTimeOriginal")
 	mainCreate := getString(m, "ExifIFD:CreateDate")
 	mainModify := getString(m, "IFD0:ModifyDate")
-	return metadata{
+	result := metadata{
+		FileType:               getString(m, "File:FileType"),
+		XMPDateTimeOriginal:    getString(m, "XMP-exif:DateTimeOriginal"),
 		DateTimeOriginal:       mainOriginal,
 		CreateDate:             mainCreate,
 		ModifyDate:             mainModify,
@@ -329,6 +338,22 @@ func decodeMetadata(m map[string]any) metadata {
 		RawFileName:            getString(m, "XMP-crs:RawFileName"),
 		PreservedFileName:      getString(m, "XMP-xmpMM:PreservedFileName"),
 	}
+	if result.FileType == "XMP" {
+		result.GPSLatitude = getString(m, "XMP-exif:GPSLatitude")
+		result.GPSLongitude = getString(m, "XMP-exif:GPSLongitude")
+		result.GPSDateTime = getString(m, "XMP-exif:GPSDateTime")
+		result.SubSecDateTimeOriginal = result.XMPDateTimeOriginal
+		result.SubSecCreateDate = result.XMPCreateDate
+		if date, err := parseExifDate(result.XMPDateTimeOriginal); err == nil {
+			result.DateTimeOriginal = date.Time.Format("2006:01:02 15:04:05")
+			result.OffsetTimeOriginal = normalizeXMPOffset(date.RawOffset)
+		}
+		if date, err := parseExifDate(result.XMPCreateDate); err == nil {
+			result.CreateDate = date.Time.Format("2006:01:02 15:04:05")
+			result.OffsetTimeDigitized = normalizeXMPOffset(date.RawOffset)
+		}
+	}
+	return result
 }
 
 func runExifTool(exifTool, dir string, args ...string) ([]byte, string, error) {
@@ -448,7 +473,7 @@ func formatOffset(minutes int) string {
 	return fmt.Sprintf("%s%02d:%02d", sign, minutes/60, minutes%60)
 }
 
-func isLightroomJPEG(m metadata) bool {
+func hasLightroomOrRAWSource(m metadata) bool {
 	if strings.Contains(strings.ToLower(m.CreatorTool), "lightroom") {
 		return true
 	}
@@ -463,6 +488,15 @@ func isLightroomJPEG(m metadata) bool {
 
 func analyzeMetadata(file string, m metadata) analysisResult {
 	base := analysisResult{File: file, Meta: m}
+	if isXMP(file) {
+		original, originalErr := parseExifDate(m.XMPDateTimeOriginal)
+		created, createdErr := parseExifDate(m.XMPDateCreated)
+		if originalErr != nil || createdErr != nil || !original.Time.Truncate(time.Second).Equal(created.Time.Truncate(time.Second)) || normalizeXMPOffset(original.RawOffset) != normalizeXMPOffset(created.RawOffset) {
+			base.State = stateAmbiguous
+			base.Reason = "XMP 拍摄时间与 Photoshop DateCreated 缺失或不一致，需人工检查"
+			return base
+		}
+	}
 	// Use the EXIF main timestamps (whole seconds) for timezone inference. Some
 	// Lightroom exports represent the same subsecond as .809 in one field and
 	// .81 in another, which is a harmless 1 ms formatting/rounding difference.
@@ -524,7 +558,7 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 		return base
 	}
 
-	if !isLightroomJPEG(m) {
+	if !hasLightroomOrRAWSource(m) {
 		base.State = stateAmbiguous
 		base.Reason = "没有找到 Lightroom/RAW 来源证据，拒绝自动修改"
 		return base
@@ -539,6 +573,9 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 		}
 		base.State = stateInitialResidue
 		base.Reason = "拍摄时间已平移，但 OffsetTimeOriginal 仍与旧数字化时区相同"
+		if isXMP(file) {
+			base.Reason = "XMP 拍摄时间已平移，但三个时间字段仍残留相同旧时区；可独立修正，无需 RAW"
+		}
 		base.TargetLocal = dtoPrecise.Local
 		base.SourceOffset = formatOffset(createOffset)
 		base.TargetOffset = formatOffset(targetOffset)

@@ -19,7 +19,7 @@ func TestNormalizeJPEGSelection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	files, err := normalizeJPEGSelection([]string{second, first, first})
+	files, err := normalizeFileSelection([]string{second, first, first})
 	if err != nil {
 		t.Fatal(err)
 	}

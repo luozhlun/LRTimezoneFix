@@ -61,6 +61,7 @@ type GUISelection struct {
 }
 
 type GUIFileResult struct {
+	FileType       string               `json:"fileType"`
 	Index          int                  `json:"index"`
 	Path           string               `json:"path"`
 	DisplayName    string               `json:"displayName"`
@@ -70,6 +71,7 @@ type GUIFileResult struct {
 	Reason         string               `json:"reason"`
 	DateTime       string               `json:"dateTimeOriginal"`
 	CreateDate     string               `json:"createDate"`
+	XMPDateCreated string               `json:"xmpDateCreated"`
 	OriginalOffset string               `json:"offsetTimeOriginal"`
 	CreateOffset   string               `json:"offsetTimeDigitized"`
 	TargetLocal    string               `json:"targetLocal"`
@@ -220,6 +222,9 @@ func (a *GUIApp) GetThumbnail(sessionID string, index int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if isXMP(file) {
+		return "", nil
+	}
 	exifTool, err := findExifTool()
 	if err != nil {
 		return "", err
@@ -316,21 +321,21 @@ func (a *GUIApp) ChooseFolder() (GUISelection, error) {
 
 func (a *GUIApp) ChooseFiles() (GUISelection, error) {
 	files, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "选择要扫描的 JPG/JPEG",
+		Title: "选择要扫描的 JPG/JPEG/XMP",
 		Filters: []wailsruntime.FileFilter{{
-			DisplayName: "JPEG 照片 (*.jpg;*.jpeg)",
-			Pattern:     "*.jpg;*.jpeg",
+			DisplayName: "照片与侧车文件 (*.jpg;*.jpeg;*.xmp)",
+			Pattern:     "*.jpg;*.jpeg;*.xmp",
 		}},
 	})
 	if err != nil || len(files) == 0 {
 		return GUISelection{}, err
 	}
-	files, err = normalizeJPEGSelection(files)
+	files, err = normalizeFileSelection(files)
 	if err != nil {
 		return GUISelection{}, err
 	}
 	root := commonParent(files)
-	label := fmt.Sprintf("已选择 %d 张照片", len(files))
+	label := fmt.Sprintf("已选择 %d 个文件", len(files))
 	if len(files) == 1 {
 		label = files[0]
 	}
@@ -349,10 +354,10 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, err
 	}
 	if selection.Mode == "folder" {
-		a.emitProgress("scan", 0, 0, "正在递归查找 JPG/JPEG……")
+		a.emitProgress("scan", 0, 0, "正在递归查找 JPG/JPEG/XMP……")
 	}
 	files, root, err := resolveGUISelectionContext(scanCtx, selection, func(visited, found int) {
-		a.emitProgress("scan", 0, 0, fmt.Sprintf("正在查找照片：已检查 %d 项，发现 %d 张", visited, found))
+		a.emitProgress("scan", 0, 0, fmt.Sprintf("正在查找文件：已检查 %d 项，发现 %d 个", visited, found))
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -361,11 +366,11 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, err
 	}
 	if len(files) == 0 {
-		return GUIScanReport{}, errors.New("所选范围内没有找到 JPG/JPEG 文件")
+		return GUIScanReport{}, errors.New("所选范围内没有找到 JPG/JPEG/XMP 文件")
 	}
 
 	progressTotal := len(files) * 2
-	a.emitProgress("scan", 0, progressTotal, fmt.Sprintf("正在读取 %d 张照片的元数据", len(files)))
+	a.emitProgress("scan", 0, progressTotal, fmt.Sprintf("正在读取 %d 个文件的元数据", len(files)))
 	allMetadata, readErrors, err := readMetadataBatchWithProgressContext(scanCtx, exifTool, files, func(done, total int) {
 		a.emitProgress("scan", done, progressTotal, fmt.Sprintf("已读取 %d / %d", done, total))
 	})
@@ -376,7 +381,7 @@ func (a *GUIApp) Scan(selection GUISelection) (GUIScanReport, error) {
 		return GUIScanReport{}, err
 	}
 
-	a.emitProgress("scan", len(files), progressTotal, fmt.Sprintf("正在分析 %d 张照片的时区信息", len(files)))
+	a.emitProgress("scan", len(files), progressTotal, fmt.Sprintf("正在分析 %d 个文件的时区信息", len(files)))
 	results := make([]analysisResult, 0, len(files))
 	for index, file := range files {
 		if scanCtx.Err() != nil {
@@ -431,7 +436,7 @@ func (a *GUIApp) Repair(request GUIRepairRequest) (GUIRepairReport, error) {
 	answer, err := wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
 		Type:          wailsruntime.QuestionDialog,
 		Title:         "确认修复时区",
-		Message:       fmt.Sprintf("将修复选中的 %d 张照片。\n\n每张原文件都会先备份，写入后还会验证元数据和 JPEG 图像数据。是否继续？", len(indices)),
+		Message:       fmt.Sprintf("将修复选中的 %d 个文件。\n\n每个原文件都会先备份，写后验证时间字段（JPG 另验证图像数据）。\nXMP 修复后请在 Lightroom 中执行“从文件读取元数据”。是否继续？", len(indices)),
 		DefaultButton: "No",
 		CancelButton:  "No",
 	})
@@ -558,20 +563,20 @@ func resolveGUISelectionContext(ctx context.Context, selection GUISelection, pro
 		if err != nil || !info.IsDir() {
 			return nil, "", errors.New("所选文件夹不存在或无法访问")
 		}
-		files, err := findJPEGsWithContext(ctx, root, progress)
+		files, err := findSupportedFilesWithContext(ctx, root, progress)
 		return files, filepath.Clean(root), err
 	case "files":
-		files, err := normalizeJPEGSelection(selection.Files)
+		files, err := normalizeFileSelection(selection.Files)
 		if err != nil {
 			return nil, "", err
 		}
 		return files, commonParent(files), nil
 	default:
-		return nil, "", errors.New("请先选择照片文件夹或 JPG/JPEG 文件")
+		return nil, "", errors.New("请先选择照片文件夹或 JPG/JPEG/XMP 文件")
 	}
 }
 
-func normalizeJPEGSelection(input []string) ([]string, error) {
+func normalizeFileSelection(input []string) ([]string, error) {
 	seen := make(map[string]bool)
 	files := make([]string, 0, len(input))
 	for _, value := range input {
@@ -581,8 +586,8 @@ func normalizeJPEGSelection(input []string) ([]string, error) {
 		}
 		abs = filepath.Clean(abs)
 		ext := strings.ToLower(filepath.Ext(abs))
-		if ext != ".jpg" && ext != ".jpeg" {
-			return nil, fmt.Errorf("不是 JPG/JPEG 文件：%s", abs)
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".xmp" {
+			return nil, fmt.Errorf("不是 JPG/JPEG/XMP 文件：%s", abs)
 		}
 		info, err := os.Stat(abs)
 		if err != nil || info.IsDir() {
@@ -653,6 +658,7 @@ func buildGUIScanReport(sessionID, root, exifTool string, results []analysisResu
 	}
 	for index, result := range results {
 		item := GUIFileResult{
+			FileType:       strings.ToUpper(strings.TrimPrefix(filepath.Ext(result.File), ".")),
 			Index:          index,
 			Path:           result.File,
 			DisplayName:    relativeName(root, result.File),
@@ -660,8 +666,9 @@ func buildGUIScanReport(sessionID, root, exifTool string, results []analysisResu
 			StateLabel:     result.State.Label(),
 			Repairable:     result.Repairable(),
 			Reason:         result.Reason,
-			DateTime:       result.Meta.DateTimeOriginal,
-			CreateDate:     result.Meta.CreateDate,
+			DateTime:       firstNonEmpty(result.Meta.SubSecDateTimeOriginal, result.Meta.DateTimeOriginal),
+			CreateDate:     firstNonEmpty(result.Meta.SubSecCreateDate, result.Meta.CreateDate),
+			XMPDateCreated: result.Meta.XMPDateCreated,
 			OriginalOffset: result.Meta.OffsetTimeOriginal,
 			CreateOffset:   result.Meta.OffsetTimeDigitized,
 			TargetLocal:    result.TargetLocal,

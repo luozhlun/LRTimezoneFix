@@ -1,19 +1,19 @@
 # LRTimezoneFix
 
-`LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后导出的 JPG/JPEG 中，日期时间已经平移、但时区及关联字段没有同步的问题。
+`LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后，JPG/JPEG 和 XMP 侧车文件中，日期时间已经平移、但时区及关联字段没有同步的问题。
 
-当前版本：`1.6.0`
+当前版本：`2.0.0`
 
 ## 功能
 
-- 现代化 Windows GUI，支持系统浅色/深色主题。
-- 使用 Windows 原生选择窗口，可递归扫描文件夹，也可只选多张 JPG/JPEG。
+- Vue 3 + Vite 重构的 Windows GUI，支持系统浅色/深色主题；独立扫描侧栏、文件类型筛选和修复前后时间对照。
+- 使用 Windows 原生选择窗口，可递归扫描文件夹，也可混选 JPG/JPEG 与 XMP。
 - 扫描阶段完全只读，显示实时进度。
 - 递归扫描由用户选择的全部子目录，并可随时点击“终止扫描”。
 - ExifTool 全程在后台静默运行，扫描时复用常驻会话，不反复弹出命令行窗口。
 - 将结果分类为“需要修复”“时间一致”“需人工检查”“读取失败”。
 - 支持文件名搜索、状态筛选、逐文件元数据详情和选择性修复。
-- 每页最多显示 100 张照片；摘要卡片可快捷筛选，搜索支持文件名和路径。
+- 每页最多显示 100 个文件；摘要卡片可快捷筛选，搜索支持文件名和路径。
 - 扫描后默认勾选全部修复候选；页头复选框只控制本页，跨页选择会保留并显示页外选择数量，可一键清除全部选择。
 - 结果列表按可见区域懒加载 JPG 内嵌 EXIF 缩略图，并可在资源管理器中定位照片。
 - 有 GPS 坐标时，离线推算 IANA 地理时区、拍摄日期对应的 UTC 偏移和夏令时状态，仅供人工参考。
@@ -21,9 +21,9 @@
 - 照片没有 GPS、GPS 无效或缺少可用日期时会明确说明，不影响扫描、默认勾选或修复结论。
 - 不写死日本、巴黎或任何城市，依据实际日期时间差通用推断 UTC 偏移。
 - 修复前逐张备份；写入后验证元数据、摘要和 JPEG 图像数据。
-- 写入独有的 `LRTimezoneFix/1;` 审计标记。
+- JPG 写入独有的 `LRTimezoneFix/1;` 审计标记；XMP 沿用备份日志，不额外写入审计字段。
 
-界面使用 [Wails v2](https://wails.io/) 和 Windows WebView2，前端为项目内嵌的原生 HTML/CSS/JavaScript。发布后的程序是单个 EXE，不需要安装 Node.js，也不会在运行时访问网络。
+界面使用 [Wails v2](https://wails.io/) 和 Windows WebView2，前端采用 [Vue 3](https://vuejs.org/guide/quick-start.html) 与 [Vite](https://vite.dev/guide/build) 构建并嵌入程序。发布后的程序是单个 EXE，不需要安装 Node.js，也不会在运行时访问网络。
 
 ## 使用方法
 
@@ -36,13 +36,14 @@
 操作步骤：
 
 1. 双击 `LRTimezoneFix.exe`。
-2. 点击“选择文件夹”递归扫描，或者点击“选择 JPG”选择特定照片。
+2. 点击“选择文件夹”递归扫描，或者点击“选择文件”选择特定 JPG/JPEG 或 XMP。
 3. 点击“开始扫描”。此阶段不会修改任何文件。
    扫描超大目录或磁盘根目录时，可以点击进度条右侧的“终止扫描”。
 4. 查看摘要、筛选结果，并点击照片查看关键字段和推断依据。超过 100 张时使用列表底部分页；切换页码和筛选不会清除已有勾选。
-5. 勾选需要处理的照片，点击“修复所选照片”。
+5. 勾选需要处理的照片，点击“修复所选文件”。
 6. 在 Windows 原生确认框中确认后，程序才会开始备份和写入。
 7. 修复结束后，程序会自动再次扫描，显示最终状态。
+8. 如果修复了 XMP，在 Lightroom 中选中对应照片，执行“元数据 → 从文件读取元数据”，然后检查一次重新导出的 JPG。
 
 ## 典型问题
 
@@ -101,6 +102,25 @@ CreateDate             2025:10:01 13:39:15  +09:00
 
 `ModifyDate`、`MetadataDate`、`HistoryWhen` 和普通 `OffsetTime` 不会改成拍摄地时区，因为它们记录的是 Lightroom 导出或后续处理时间。GPS 日期时间也不会修改。
 
+## XMP 侧车修正
+
+XMP 可独立分析和修正，不需要 NEF 或其他 RAW 文件。程序读取 XMP `exif:DateTimeOriginal`、`xmp:CreateDate` 和 `photoshop:DateCreated`，从时间值中的偏移推断目标时区。需要 Lightroom/RAW 来源证据、三个字段偏移一致，且 `DateCreated` 与拍摄时间一致；缺失字段或证据冲突时列为人工检查。
+
+推断沿用整秒时间的整分钟差，忽略 Lightroom 小数秒表示的微小舍入差异；写入保留 `DateTimeOriginal` 的原始小数秒精度。例如：
+
+```text
+修复前
+exif:DateTimeOriginal   2025-10-01T13:39:15.809+08:00
+xmp:CreateDate          2025-10-01T12:39:15.81+08:00
+photoshop:DateCreated   2025-10-01T13:39:15.809+08:00
+
+修复后：三个字段统一为 2025-10-01T13:39:15.809+09:00
+```
+
+XMP 只写入以上三个时间字段，保留修图参数、评级、历史、修改时间等信息；不执行 JPG 的 MWG、IPTC 摘要或图像数据校验。沿用现有原文件备份、备份日志、写后验证与失败恢复。XMP 在列表中显示类型标识，不请求 JPG 缩略图。
+
+**Lightroom 目录需要同步：**先将最新修图结果保存到 XMP，再用本工具扫描修复；修复后执行“从文件读取元数据”，让目录读取修正值。在这之前让 Lightroom 写回元数据，可能会用旧目录值覆盖修正。后续导出是否持续继承正确偏移，需要实际重新导出确认；工具不会直接修改 Lightroom 目录或 RAW 本体。
+
 ## GPS 时区参考
 
 程序会读取照片中的 GPS 经纬度，并通过内嵌的离线时区边界查找 IANA 时区，再结合 GPS UTC 时间（优先）或拍摄当地时间判断当时的 UTC 偏移和夏令时状态。结果显示在照片的“元数据详情”中。
@@ -111,7 +131,7 @@ GPS 边界查询使用 [tzf](https://github.com/ringsaturn/tzf)；其边界数�
 
 ## 备份与验证
 
-程序对每张待修照片执行：
+JPG 修复对每张待修照片执行以下步骤；XMP 的写入和验证范围见上文：
 
 1. 在照片所在目录创建 `ExifTool_Backup_YYYYMMDD_HHMMSS`。
 2. 复制原文件并用 SHA-256 验证备份一致，同时写入 `LRTimezoneFix_Backup.log`。
@@ -135,7 +155,7 @@ LRTimezoneFix/1; action=timezone-normalize; from=+08:00; to=+09:00; wall-shift=+
 ExifTool_Backup_YYYYMMDD_HHMMSS
 ```
 
-需要恢复时，关闭 Lightroom 或其他可能占用照片的软件，把备份 JPG 复制回上一级目录并覆盖当前文件。
+需要恢复时，关闭 Lightroom 或其他可能占用照片的软件，把备份 JPG 或 XMP 复制回上一级目录并覆盖当前文件。
 
 ## 开发依赖与编译
 
@@ -144,7 +164,7 @@ ExifTool_Backup_YYYYMMDD_HHMMSS
 - Windows 10/11 x64。
 - Go 1.26 或与 `go.mod` 兼容的更新版本。
 - Wails v2.13 由 `go.mod` 管理，不需要全局安装 Wails CLI。
-- 不需要 Node.js、npm 或 GCC；前端是直接嵌入的原生 HTML/CSS/JavaScript。
+- 修改前端需要 Node.js 20.19+ 或 22.12+ 与 pnpm 11；仅从仓库编译已提交的前端产物无需 Node.js，也不需要 GCC。
 - `go-winres` 仅在修改应用图标、Windows 版本信息或清单时需要，普通编译不需要。
 
 在项目目录下载 Go 依赖：
@@ -160,13 +180,23 @@ go test -tags "desktop,production" ./...
 go vet -tags "desktop,production" ./...
 ```
 
+前端开发与构建（修改界面后先构建，再编译 Go）：
+
+```powershell
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend dev
+pnpm --dir frontend build
+```
+
+`dev` 用于界面开发；文件选择、扫描、修复等原生操作需要编译后的 Wails 程序。
+
 前端逻辑回归测试（需要 Node.js）：
 
 ```powershell
 node frontend/tests/app.test.cjs
 ```
 
-可选浏览器交互测试：在安装 Playwright 和 Microsoft Edge 的环境执行 `node build/ui-smoke.cjs`。该测试使用模拟桥接与 10,000 条结果，覆盖分页、跨页选择、搜索、详情与取消修复，不读写实际照片。可设置 `PLAYWRIGHT_MODULE` 使用已有 Playwright 安装路径。
+可选浏览器交互测试：在安装 Playwright 和 Microsoft Edge 的环境执行 `node build/ui-smoke.cjs`。该测试使用模拟桥接与 10,000 条结果，覆盖分页、跨页选择、类型筛选、搜索、详情、取消修复与修复结果提示，不读写实际照片。可设置 `PLAYWRIGHT_MODULE` 使用已有 Playwright 安装路径。
 
 编译无控制台的正式 GUI：
 
@@ -181,7 +211,7 @@ go build -tags "desktop,production" -trimpath -o LRTimezoneFix-cli.exe .
 LRTimezoneFix-cli.exe -root "D:\照片目录" -analyze-only -no-pause
 ```
 
-前端文件直接位于 `frontend/dist`，不依赖 npm 构建流程。
+前端源文件位于 `frontend/src`，图标位于 `frontend/public`；Vite 构建产物位于 `frontend/dist`，由 Go 嵌入。构建产物随源码提交，避免运行时依赖 Node.js 或网络。
 
 Windows 图标、版本信息和高 DPI 清单已经保存在 `rsrc_windows_amd64.syso`。因此从仓库直接编译时不需要安装 `go-winres`。
 
@@ -197,7 +227,7 @@ go install github.com/tc-hib/go-winres@v0.3.3
 go-winres make --arch amd64 --out rsrc
 ```
 
-图标的矢量源文件为 `frontend/dist/appicon.svg`，界面直接使用该文件。
+图标的矢量源文件为 `frontend/public/appicon.svg`，界面直接使用该文件。
 如需修改图标，在安装了 `sharp` 的 Node.js 环境执行 `node build/render-icon.cjs`，生成 `build/appicon.png` 后再运行上述资源生成命令。普通应用编译无需 Node.js 或 sharp。
 
 生成的 `rsrc_windows_amd64.syso` 应随源码提交。升级版本时还要同步修改 `main.go` 中的版本号和 `winres/winres.json` 中的文件/产品版本，然后重新编译 EXE。
@@ -214,6 +244,14 @@ go-winres make --arch amd64 --out rsrc
 源码、`go.mod`、`go.sum`、README 和内嵌前端应提交到仓库；正式 EXE 建议作为 GitHub Release 附件发布，而不是直接提交进 Git。
 
 ## 版本记录
+
+### 2.0.0
+
+- 新增 XMP 侧车独立修正，无需 RAW；同步三个拍摄时间字段并保留小数秒、修图参数和历史。
+- JPG/JPEG 与 XMP 可混合扫描和选择修复，沿用原文件备份、日志及失败恢复。
+- Vue 3 + Vite 重构界面，增加文件类型筛选、侧栏流程与时间对照，保留分页、跨页选择、只读扫描取消、懒加载缩略图和 GPS 参考。
+- XMP 修复前后提示 Lightroom 目录同步步骤，展示具体修复失败原因。
+
 
 ### 1.6.0
 

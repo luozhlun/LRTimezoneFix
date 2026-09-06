@@ -24,7 +24,7 @@ func TestFindJPEGsIncludesDotDirectoriesAndSkipsBackups(t *testing.T) {
 		}
 	}
 
-	files, err := findJPEGs(root)
+	files, err := findSupportedFiles(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestFindJPEGsIncludesDotDirectoriesAndSkipsBackups(t *testing.T) {
 func TestFindJPEGsHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := findJPEGsWithContext(ctx, t.TempDir(), nil)
+	_, err := findSupportedFilesWithContext(ctx, t.TempDir(), nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
