@@ -463,7 +463,7 @@ func (a *GUIApp) Repair(request GUIRepairRequest) (GUIRepairReport, error) {
 		candidate := &session.Results[index]
 		a.emitProgress("repair", position, len(indices), "正在修复 "+filepath.Base(candidate.File))
 		item := GUIRepairItem{Index: index}
-		if err := repairFileWithRunner(exifTool, reader, candidate, stamp, batchTime); err != nil {
+		if err := repairFileWithRunner(reader, candidate, stamp, batchTime); err != nil {
 			item.Error = err.Error()
 			report.Failed++
 		} else {

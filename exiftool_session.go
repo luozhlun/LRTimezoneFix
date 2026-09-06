@@ -110,12 +110,14 @@ func (s *exifToolSession) RunFiles(dir string, names []string, args ...string) (
 	s.nextID++
 	id := strconv.FormatUint(s.nextID, 10)
 	readyMarker := "{ready" + id + "}"
+	statusMarker := "{status" + id + "}"
 	s.stderr.reset()
 
 	commandArgs := make([]string, 0, len(args)+len(names)+4)
 	commandArgs = append(commandArgs, args...)
 	commandArgs = append(commandArgs,
 		"-charset", "filename=UTF8",
+		"-echo3", statusMarker+"${status}",
 	)
 	for _, name := range names {
 		path := name
@@ -127,7 +129,8 @@ func (s *exifToolSession) RunFiles(dir string, names []string, args ...string) (
 
 	for _, arg := range commandArgs {
 		if strings.ContainsAny(arg, "\r\n") {
-			return nil, "", fmt.Errorf("ExifTool 常驻参数包含换行符，无法安全传递")
+			// Preserve multiline UserComment values using ExifTool's argfile syntax.
+			arg = "#[CSTR]" + strings.NewReplacer("\\", "\\\\", "\r", "\\r", "\n", "\\n").Replace(arg)
 		}
 		if _, err := s.writer.WriteString(arg + "\n"); err != nil {
 			return nil, s.stderr.string(), err
@@ -141,6 +144,7 @@ func (s *exifToolSession) RunFiles(dir string, names []string, args ...string) (
 	}
 
 	var output bytes.Buffer
+	var commandErr error
 	for {
 		line, err := s.reader.ReadString('\n')
 		if err != nil {
@@ -148,8 +152,12 @@ func (s *exifToolSession) RunFiles(dir string, names []string, args ...string) (
 		}
 		trimmed := strings.TrimRight(line, "\r\n")
 		switch {
+		case strings.HasPrefix(trimmed, statusMarker):
+			if status := strings.TrimPrefix(trimmed, statusMarker); status != "0" {
+				commandErr = fmt.Errorf("ExifTool 命令失败（状态 %s）", status)
+			}
 		case trimmed == readyMarker:
-			return output.Bytes(), s.stderr.string(), nil
+			return output.Bytes(), s.stderr.string(), commandErr
 		default:
 			output.WriteString(line)
 		}

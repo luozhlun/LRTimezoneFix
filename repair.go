@@ -11,11 +11,19 @@ import (
 )
 
 func repairFile(exifTool string, candidate *analysisResult, stamp string, repairedAt time.Time) (err error) {
-	return repairFileWithRunner(exifTool, directExifToolRunner{exifTool: exifTool}, candidate, stamp, repairedAt)
+	return repairFileWithRunner(directExifToolRunner{exifTool: exifTool}, candidate, stamp, repairedAt)
 }
 
-func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candidate *analysisResult, stamp string, repairedAt time.Time) (err error) {
+func repairFileWithRunner(runner exifToolCommandRunner, candidate *analysisResult, stamp string, repairedAt time.Time) (err error) {
 	file := candidate.File
+	// Scan only needs metadata. Read the full JPEG image hash for selected files.
+	if !isXMP(file) && candidate.Meta.ImageDataHash == "" {
+		before, readErr := readMetadataWithRunner(runner, file)
+		if readErr != nil {
+			return fmt.Errorf("修复前读取失败：%w", readErr)
+		}
+		candidate.Meta.ImageDataHash = before.ImageDataHash
+	}
 	backupDir := filepath.Join(filepath.Dir(file), backupPrefix+stamp)
 	backupPath := filepath.Join(backupDir, filepath.Base(file))
 
@@ -87,12 +95,12 @@ func repairFileWithRunner(exifTool string, reader exifToolCommandRunner, candida
 			"-XMP-photoshop:DateCreated=" + target,
 		}
 	}
-	_, stderr, writeErr := runExifToolForFiles(exifTool, filepath.Dir(file), []string{filepath.Base(file)}, args...)
+	_, stderr, writeErr := runner.RunFiles(filepath.Dir(file), []string{filepath.Base(file)}, args...)
 	if writeErr != nil {
 		return fmt.Errorf("ExifTool 写入失败：%v；%s", writeErr, strings.TrimSpace(stderr))
 	}
 
-	after, err := readMetadataWithRunner(reader, file)
+	after, err := readMetadataWithRunner(runner, file)
 	if err != nil {
 		return fmt.Errorf("写后读取失败：%w", err)
 	}

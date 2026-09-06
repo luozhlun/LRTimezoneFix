@@ -13,7 +13,7 @@ import (
 
 const (
 	appName       = "LRTimezoneFix"
-	version       = "2.0.0"
+	version       = "2.1.0"
 	backupPrefix  = "ExifTool_Backup_"
 	auditPrefix   = "LRTimezoneFix/1;"
 	defaultMarker = "timezone-normalize"
@@ -153,7 +153,7 @@ func run(opts options) error {
 	fmt.Println("\n================ 开始修复 ================")
 	for i := range candidates {
 		candidate := &candidates[i]
-		if err := repairFileWithRunner(exifTool, reader, candidate, stamp, batchTime); err != nil {
+		if err := repairFileWithRunner(reader, candidate, stamp, batchTime); err != nil {
 			failed++
 			fmt.Printf("失败：%s\n  %v\n", relativeName(root, candidate.File), err)
 		} else {

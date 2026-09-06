@@ -23,22 +23,22 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "2.0.0.0",
-          "product_version": "2.0.0.0"
+          "file_version": "2.1.0.0",
+          "product_version": "2.1.0.0"
         },
         "info": {
           "0409": {
             "Comments": "Repairs Lightroom JPEG and XMP timezone metadata",
             "CompanyName": "",
             "FileDescription": "Lightroom JPG and XMP timezone repair tool",
-            "FileVersion": "2.0.0.0",
+            "FileVersion": "2.1.0.0",
             "InternalName": "LRTimezoneFix",
             "LegalCopyright": "",
             "LegalTrademarks": "",
             "OriginalFilename": "LRTimezoneFix.exe",
             "PrivateBuild": "",
             "ProductName": "LRTimezoneFix",
-            "ProductVersion": "2.0.0.0",
+            "ProductVersion": "2.1.0.0",
             "SpecialBuild": ""
           }
         }

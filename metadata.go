@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -147,13 +148,57 @@ func readMetadataBatchWithProgressContext(ctx context.Context, exifTool string, 
 	if len(files) == 0 {
 		return make(map[string]metadata), make(map[string]error), nil
 	}
-	runner := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
-	session, err := newExifToolSession(exifTool)
-	if err == nil {
-		runner = session
-		defer session.Close()
+	// Each worker owns one ExifTool process. A shared session serializes requests.
+	workers := min(4, (len(files)+15)/16)
+	type update struct {
+		done     int
+		rows     map[string]metadata
+		failures map[string]error
+		err      error
 	}
-	return readMetadataBatchWithRunnerContext(ctx, files, progress, runner)
+	updates := make(chan update, workers)
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group := files[len(files)*worker/workers : len(files)*(worker+1)/workers]
+		wg.Go(func() {
+			runner := exifToolCommandRunner(directExifToolRunner{exifTool: exifTool})
+			session, err := newExifToolSession(exifTool)
+			if err == nil {
+				runner = session
+				defer session.Close()
+			}
+			last := 0
+			rows, failures, err := readMetadataBatchWithArguments(ctx, group, func(done, total int) {
+				updates <- update{done: done - last}
+				last = done
+			}, runner, metadataReadArguments(false))
+			updates <- update{rows: rows, failures: failures, err: err}
+		})
+	}
+	go func() { wg.Wait(); close(updates) }()
+	rows := make(map[string]metadata, len(files))
+	failures := make(map[string]error)
+	done := 0
+	var readErr error
+	for item := range updates {
+		for file, row := range item.rows {
+			rows[file] = row
+		}
+		for file, err := range item.failures {
+			failures[file] = err
+		}
+		if item.err != nil {
+			readErr = item.err
+		}
+		done += item.done
+		if item.done > 0 && progress != nil {
+			progress(done, len(files))
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		readErr = err
+	}
+	return rows, failures, readErr
 }
 
 func readMetadataBatchWithRunner(files []string, progress func(done, total int), runner exifToolCommandRunner) (map[string]metadata, map[string]error) {
@@ -162,6 +207,10 @@ func readMetadataBatchWithRunner(files []string, progress func(done, total int),
 }
 
 func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, progress func(done, total int), runner exifToolCommandRunner) (map[string]metadata, map[string]error, error) {
+	return readMetadataBatchWithArguments(ctx, files, progress, runner, metadataReadArguments(true))
+}
+
+func readMetadataBatchWithArguments(ctx context.Context, files []string, progress func(done, total int), runner exifToolCommandRunner, args []string) (map[string]metadata, map[string]error, error) {
 	results := make(map[string]metadata, len(files))
 	failures := make(map[string]error)
 	byDirectory := make(map[string][]string)
@@ -173,9 +222,6 @@ func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, pro
 
 	done := 0
 	const batchSize = 16
-	// The read arguments are immutable across batches; avoid rebuilding this
-	// fixed list for every group of files.
-	args := metadataReadArguments()
 	for dir, group := range byDirectory {
 		for start := 0; start < len(group); start += batchSize {
 			if err := ctx.Err(); err != nil {
@@ -227,8 +273,8 @@ func readMetadataBatchWithRunnerContext(ctx context.Context, files []string, pro
 	return results, failures, nil
 }
 
-func metadataReadArguments() []string {
-	return []string{
+func metadataReadArguments(includeImageHash bool) []string {
+	args := []string{
 		"-j", "-G1", "-s", "-n", "-a",
 		"-api", "RequestAll=3",
 		"-File:FileType",
@@ -265,11 +311,14 @@ func metadataReadArguments() []string {
 		"-ExifIFD:UserComment",
 		"-Photoshop:IPTCDigest",
 		"-File:CurrentIPTCDigest",
-		"-File:ImageDataHash",
 		"-XMP-xmp:CreatorTool",
 		"-XMP-crs:RawFileName",
 		"-XMP-xmpMM:PreservedFileName",
 	}
+	if includeImageHash {
+		args = append(args, "-File:ImageDataHash")
+	}
+	return args
 }
 
 func runExifToolForFiles(exifTool, dir string, names []string, args ...string) ([]byte, string, error) {
