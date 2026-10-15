@@ -2,7 +2,7 @@
 
 `LRTimezoneFix` 是一个 Windows 桌面工具，用于修复 Lightroom 调整拍摄时间后，JPG/JPEG 和 XMP 侧车文件中，日期时间已经平移、但时区及关联字段没有同步的问题。
 
-当前版本：`2.1.1`
+当前版本：`2.2.1`
 
 ## 功能
 
@@ -16,9 +16,9 @@
 - 每页最多显示 100 个文件；摘要卡片可快捷筛选，搜索支持文件名和路径。
 - 扫描后默认勾选全部修复候选；页头复选框只控制本页，跨页选择会保留并显示页外选择数量，可一键清除全部选择。
 - 结果列表按可见区域懒加载 JPG 内嵌 EXIF 缩略图，并可在资源管理器中定位照片。
-- 有 GPS 坐标时，离线推算 IANA 地理时区、拍摄日期对应的 UTC 偏移和夏令时状态，仅供人工参考。
-- 拍摄时间位于时区偏移变更前后 24 小时、重复时段或跳过时段时，在列表和详情中提示人工核对。
-- 照片没有 GPS、GPS 无效或缺少可用日期时会明确说明，不影响扫描、默认勾选或修复结论。
+- 有可用 GPS 坐标时，默认采用离线查到的 IANA 地理时区及拍摄日期对应的 UTC 偏移和夏令时规则。
+- 拍摄时间位于时区偏移变更前后 24 小时、重复时段或跳过时段时，列为“需人工检查”，暂停自动修复。
+- 照片没有可用 GPS 时沿用时间差推断；`Z` 与 `+00:00` 均按 UTC 零偏移识别和验证，不限定相机品牌。
 - 不写死日本、巴黎或任何城市，依据实际日期时间差通用推断 UTC 偏移。
 - 修复前逐张备份；写入后验证元数据、摘要和 JPEG 图像数据。
 - JPG 写入独有的 `LRTimezoneFix/1;` 审计标记；XMP 沿用备份日志，不额外写入审计字段。
@@ -65,7 +65,7 @@ CreateDate             2025:10:01 13:39:15  +09:00
 
 ## 通用推断规则
 
-核心计算：
+有可用 GPS 时优先采用下文的 GPS 时区规则；没有可用 GPS 时使用以下计算：
 
 ```text
 墙上时间变化 = DateTimeOriginal - CreateDate
@@ -83,10 +83,10 @@ CreateDate             2025:10:01 13:39:15  +09:00
 
 1. JPG 中存在 Lightroom 或 RAW 来源证据。
 2. `DateTimeOriginal` 与 `CreateDate` 存在整分钟差值。
-3. `OffsetTimeOriginal` 与 `OffsetTimeDigitized` 相同，表明二者共同残留旧偏移。
+3. `OffsetTimeOriginal` 与 `OffsetTimeDigitized` 相同，表明二者共同残留旧偏移；或拍摄时区缺失、原创建时区明确为 UTC+0，符合 Lightroom 调整时间后丢失 UTC 后缀的情况。
 4. 推断结果位于合法的 `-14:00` 到 `+14:00` 范围。
 
-两个时区字段已经不一致、证据不足或差值无法唯一解释时，程序会标记为“需人工检查”并拒绝自动修改。
+没有可用 GPS 时，两个明确的时区字段已经不一致、证据不足或差值无法唯一解释，程序会标记为“需人工检查”并拒绝自动修改。拍摄时区缺失时，仅在创建时区明确为 `Z` / `+00:00` 且存在非零时间平移时适用上述例外；不会将所有缺失时区视为 UTC。
 
 ## 修复字段
 
@@ -104,7 +104,9 @@ CreateDate             2025:10:01 13:39:15  +09:00
 
 ## XMP 侧车修正
 
-XMP 可独立分析和修正，不需要 NEF 或其他 RAW 文件。程序读取 XMP `exif:DateTimeOriginal`、`xmp:CreateDate` 和 `photoshop:DateCreated`，从时间值中的偏移推断目标时区。需要 Lightroom/RAW 来源证据、三个字段偏移一致，且 `DateCreated` 与拍摄时间一致；缺失字段或证据冲突时列为人工检查。
+XMP 可独立分析和修正，不需要 NEF 或其他 RAW 文件。程序读取 XMP `exif:DateTimeOriginal`、`xmp:CreateDate` 和 `photoshop:DateCreated`，优先采用 GPS 地理时区，否则从时间差推断目标偏移。需要 Lightroom/RAW 来源证据，且 `DateCreated` 与拍摄钟面时间一致；没有可用 GPS 时还要求三个字段偏移一致，或拍摄时间和 `DateCreated` 均缺失偏移、`CreateDate` 明确为 UTC+0 且存在非零时间平移。缺失拍摄/创建日期或钟面时间冲突时列为人工检查。`Z` 与 `+00:00` 等价。
+
+例如，`CreateDate=2026-10-07T07:11:14.23Z`，调整后的 `DateTimeOriginal` 和 `DateCreated` 为 `2026-10-07T10:11:14.230`（无偏移），可推断并统一为 `2026-10-07T10:11:14.230+03:00`。JPG 的 `OffsetTimeDigitized=+00:00` 提供同样的原创建时区依据；无需读取同名 RAW。
 
 推断沿用整秒时间的整分钟差，忽略 Lightroom 小数秒表示的微小舍入差异；写入保留 `DateTimeOriginal` 的原始小数秒精度。例如：
 
@@ -121,13 +123,17 @@ XMP 只写入以上三个时间字段，保留修图参数、评级、历史、�
 
 **Lightroom 目录需要同步：**先将最新修图结果保存到 XMP，再用本工具扫描修复；修复后执行“从文件读取元数据”，让目录读取修正值。在这之前让 Lightroom 写回元数据，可能会用旧目录值覆盖修正。后续导出是否持续继承正确偏移，需要实际重新导出确认；工具不会直接修改 Lightroom 目录或 RAW 本体。
 
-## GPS 时区参考
+## GPS 时区优先
 
 程序会读取照片中的 GPS 经纬度，并通过内嵌的离线时区边界查找 IANA 时区，再结合 GPS UTC 时间（优先）或拍摄当地时间判断当时的 UTC 偏移和夏令时状态。结果显示在照片的“元数据详情”中。
 
-这项信息与自动修复推断完全解耦：不会改变照片分类、目标偏移、默认勾选或写入内容。若参考时间距离时区偏移变更不足 24 小时，或落入夏令时回拨的重复时段、拨快的跳过时段，列表会显示黄色标签，并建议人工核对。
+有可用 GPS 时，目标偏移以地理时区为准，即使原时间差推断得到不同结果，或相机偏移缺失、两个旧偏移不同，也优先采用 GPS。保留 `DateTimeOriginal` 的钟面时间和小数秒，同步创建时间和相关偏移；GPS UTC 时间用于判断当时的时区规则，不用于替换拍摄钟面时间。仍需 Lightroom/RAW 来源证据、可解析的拍摄/创建时间及不超过 14 小时的整分钟差。GPS 不可用时沿用原推断。
 
-GPS 边界查询使用 [tzf](https://github.com/ringsaturn/tzf)；其边界数据来自 [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) 和 OpenStreetMap 贡献者，数据依 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 提供。默认简化边界在时区交界附近可能存在约百米级误差，因此所有 GPS 推算均只作为参考。
+若参考时刻距离时区偏移变更不超过 24 小时，或当地时间落入夏令时回拨的重复时段、拨快的跳过时段，则标记为“需人工检查”，不默认勾选且不提供自动修复。这也适用于带 GPS UTC 时间的切换附近照片。偏移依据照片拍摄日期的历史规则计算，不使用电脑当前日期或当前偏移。
+
+GPS 优先可能改变原创建时间表示的 UTC 时刻，因此 JPG 审计标记中的 `utc-preserved` 会按实际结果记录为 `yes`、`no` 或 `unknown`。
+
+GPS 边界查询使用 [tzf](https://github.com/ringsaturn/tzf)；其边界数据来自 [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) 和 OpenStreetMap 贡献者，数据依 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 提供。默认简化边界在时区交界附近可能存在约百米级误差，交界处的照片请核对地理时区。
 
 ## 备份与验证
 
@@ -244,6 +250,18 @@ go-winres make --arch amd64 --out rsrc
 源码、`go.mod`、`go.sum`、README 和内嵌前端应提交到仓库；正式 EXE 建议作为 GitHub Release 附件发布，而不是直接提交进 Git。
 
 ## 版本记录
+
+### 2.2.1
+
+- 修复 Lightroom 从 UTC+0 调整拍摄时间后丢失拍摄时区后缀、导致 JPG/XMP 被列为人工检查的问题。
+- 原创建时区明确为 UTC+0 且其他推断证据满足要求时，从时间差恢复目标偏移；仅使用 JPG/XMP，无需同名 RAW。
+
+### 2.2.0
+
+- 默认优先采用 GPS 坐标对应的拍摄地时区和拍摄日期的夏令时规则；没有可用 GPS 时沿用时间差推断。
+- 时区偏移变更前后 24 小时及重复/跳过时段列为人工检查，暂停自动修复。
+- 修复 JPG 写后验证误将 UTC 结尾 `Z` 与 `+00:00` 视为不同偏移的问题，通用偏移解析接受 `Z`。
+- 同步界面中的 GPS 优先说明，GPS 修复的 UTC 保持情况按实际结果记录。
 
 ### 2.1.1
 

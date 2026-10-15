@@ -15,8 +15,7 @@ import (
 
 const timezoneTransitionWarningWindow = 24 * time.Hour
 
-// GPSTimezoneReference is read-only contextual information. It is deliberately
-// kept separate from the repair inference and never changes repair eligibility.
+// GPSTimezoneReference supplies the preferred repair offset when GPS is usable.
 type GPSTimezoneReference struct {
 	Status            string  `json:"status"`
 	Latitude          float64 `json:"latitude"`
@@ -43,7 +42,15 @@ var (
 
 func analyzePhotoMetadata(file string, m metadata) analysisResult {
 	result := analyzeMetadata(file, m)
-	result.GPSReference = buildGPSTimezoneReference(m, result)
+	ref := buildGPSTimezoneReference(m, result)
+	if ref.Status == "available" {
+		if ref.NeedsManualReview {
+			result = analysisResult{File: file, Meta: m, State: stateAmbiguous, Reason: "GPS 时区接近偏移切换或当地时间不唯一，暂停自动修复。" + ref.Warning}
+		} else {
+			result = analyzeMetadataWithTargetOffset(file, m, ref.Offset)
+		}
+	}
+	result.GPSReference = ref
 	return result
 }
 
@@ -130,7 +137,7 @@ func buildGPSTimezoneReference(m metadata, result analysisResult) GPSTimezoneRef
 		ref.NeedsManualReview = true
 		ref.Warning = strings.Join(warnings, " ") + " 照片时间可能经过 Lightroom 平移，建议人工核对。"
 	}
-	ref.Note = "GPS 推算仅供参考，不参与自动修复判断或默认勾选。"
+	ref.Note = "默认优先采用 GPS 地理时区；保留拍摄钟面时间。偏移切换前后 24 小时或当地时间不唯一时，需人工检查。"
 	return ref
 }
 

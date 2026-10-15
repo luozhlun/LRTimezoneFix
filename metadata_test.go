@@ -78,6 +78,40 @@ func TestAnalyzeInitialResidue(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMissingOriginalUTCOffset(t *testing.T) {
+	for _, tc := range []struct {
+		name, originalOffset, createOffset, original, creator string
+		state                                                 analysisState
+	}{
+		{"Lightroom dropped UTC offset", "", "+00:00", "2026:10:07 10:11:14", "Lightroom", stateInitialResidue},
+		{"Z on creation", "", "Z", "2026:10:07 10:11:14", "Lightroom", stateInitialResidue},
+		{"no UTC anchor", "", "", "2026:10:07 10:11:14", "Lightroom", stateAmbiguous},
+		{"nonzero creation offset", "", "+08:00", "2026:10:07 10:11:14", "Lightroom", stateAmbiguous},
+		{"invalid original offset", "invalid", "+00:00", "2026:10:07 10:11:14", "Lightroom", stateAmbiguous},
+		{"no source evidence", "", "+00:00", "2026:10:07 10:11:14", "", stateAmbiguous},
+		{"no wall shift", "", "+00:00", "2026:10:07 07:11:14", "Lightroom", stateAmbiguous},
+		{"non-minute shift", "", "+00:00", "2026:10:07 10:11:15", "Lightroom", stateAmbiguous},
+		{"out of range", "", "+00:00", "2026:10:08 10:11:14", "Lightroom", stateAmbiguous},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := baseTestMetadata()
+			m.DateTimeOriginal = tc.original
+			m.SubSecDateTimeOriginal = tc.original + ".230"
+			m.CreateDate = "2026:10:07 07:11:14"
+			m.SubSecCreateDate = m.CreateDate + ".23" + tc.createOffset
+			m.OffsetTimeOriginal, m.OffsetTimeDigitized = tc.originalOffset, tc.createOffset
+			m.CreatorTool = tc.creator
+			r := analyzePhotoMetadata("photo.jpg", m)
+			if r.State != tc.state {
+				t.Fatalf("unexpected classification: %+v", r)
+			}
+			if r.Repairable() && (r.TargetOffset != "+03:00" || r.TargetLocal != tc.original+".230" || r.SourceOffset != "+00:00") {
+				t.Fatalf("must infer UTC+3 and preserve capture precision: %+v", r)
+			}
+		})
+	}
+}
+
 func TestAnalyzeIgnoresSubsecondRoundingDifference(t *testing.T) {
 	m := baseTestMetadata()
 	m.SubSecDateTimeOriginal = "2025:10:01 13:39:15.809+08:00"

@@ -167,13 +167,26 @@ func appendBackupLogResult(backupDir, sourcePath, status, detail string, at time
 }
 
 func buildAuditMarker(candidate analysisResult, repairedAt time.Time) string {
+	utcPreserved := "yes"
+	if candidate.GPSReference.Status == "available" {
+		utcPreserved = "unknown"
+		before, beforeOK := parseGPSDateTime(candidate.Meta.CreateDate + candidate.Meta.OffsetTimeDigitized)
+		after, afterOK := parseGPSDateTime(candidate.TargetLocal + candidate.TargetOffset)
+		if beforeOK && afterOK {
+			utcPreserved = "no"
+			if before.Truncate(time.Second).Equal(after.Truncate(time.Second)) {
+				utcPreserved = "yes"
+			}
+		}
+	}
 	return fmt.Sprintf(
-		"%s action=%s; from=%s; to=%s; wall-shift=%s; utc-preserved=yes; normalized=DateTimeOriginal,CreateDate; version=%s; repaired-at=%s",
+		"%s action=%s; from=%s; to=%s; wall-shift=%s; utc-preserved=%s; normalized=DateTimeOriginal,CreateDate; version=%s; repaired-at=%s",
 		auditPrefix,
 		defaultMarker,
 		candidate.SourceOffset,
 		candidate.TargetOffset,
 		formatSignedMinutes(candidate.ShiftMinutes),
+		utcPreserved,
 		version,
 		repairedAt.Format("2006-01-02T15:04:05Z07:00"),
 	)
@@ -217,14 +230,20 @@ func verifyRepair(before analysisResult, after metadata, marker string) error {
 	if !dto.Time.Equal(expected.Time) || !create.Time.Equal(expected.Time) {
 		return fmt.Errorf("验证失败：DateTimeOriginal/CreateDate 没有统一为 %s", before.TargetLocal)
 	}
-	if after.OffsetTimeOriginal != before.TargetOffset || after.OffsetTimeDigitized != before.TargetOffset {
+	if normalizeXMPOffset(after.OffsetTimeOriginal) != before.TargetOffset || normalizeXMPOffset(after.OffsetTimeDigitized) != before.TargetOffset {
 		return fmt.Errorf("验证失败：时区不是预期值 %s（实际 %s / %s）", before.TargetOffset, after.OffsetTimeOriginal, after.OffsetTimeDigitized)
 	}
-	if !strings.HasSuffix(after.XMPDateCreated, before.TargetOffset) || !strings.HasSuffix(after.XMPCreateDate, before.TargetOffset) {
-		return fmt.Errorf("验证失败：XMP 拍摄/创建时间时区未同步")
+	for _, value := range []string{after.XMPDateCreated, after.XMPCreateDate} {
+		date, err := parseExifDate(value)
+		if err != nil || normalizeXMPOffset(date.RawOffset) != before.TargetOffset {
+			return fmt.Errorf("验证失败：XMP 拍摄/创建时间时区未同步")
+		}
 	}
-	if !strings.HasSuffix(after.IPTCTimeCreated, before.TargetOffset) || !strings.HasSuffix(after.IPTCDigitalTime, before.TargetOffset) {
-		return fmt.Errorf("验证失败：IPTC 拍摄/数字化时间时区未同步")
+	for _, value := range []string{after.IPTCTimeCreated, after.IPTCDigitalTime} {
+		date, err := parseExifDate("2000:01:01 " + value)
+		if err != nil || normalizeXMPOffset(date.RawOffset) != before.TargetOffset {
+			return fmt.Errorf("验证失败：IPTC 拍摄/数字化时间时区未同步")
+		}
 	}
 	if after.IPTCDigest == "" || after.CurrentIPTCDigest == "" || !strings.EqualFold(after.IPTCDigest, after.CurrentIPTCDigest) {
 		return fmt.Errorf("验证失败：IPTCDigest 与 CurrentIPTCDigest 不一致")

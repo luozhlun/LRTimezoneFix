@@ -497,6 +497,9 @@ func parseExifDate(value string) (parsedDate, error) {
 }
 
 func parseOffset(value string) (int, error) {
+	if strings.TrimSpace(value) == "Z" {
+		return 0, nil
+	}
 	match := offsetPattern.FindStringSubmatch(strings.TrimSpace(value))
 	if match == nil {
 		return 0, fmt.Errorf("无法解析时区 %q", value)
@@ -536,11 +539,15 @@ func hasLightroomOrRAWSource(m metadata) bool {
 }
 
 func analyzeMetadata(file string, m metadata) analysisResult {
+	return analyzeMetadataWithTargetOffset(file, m, "")
+}
+
+func analyzeMetadataWithTargetOffset(file string, m metadata, targetOffset string) analysisResult {
 	base := analysisResult{File: file, Meta: m}
 	if isXMP(file) {
 		original, originalErr := parseExifDate(m.XMPDateTimeOriginal)
 		created, createdErr := parseExifDate(m.XMPDateCreated)
-		if originalErr != nil || createdErr != nil || !original.Time.Truncate(time.Second).Equal(created.Time.Truncate(time.Second)) || normalizeXMPOffset(original.RawOffset) != normalizeXMPOffset(created.RawOffset) {
+		if originalErr != nil || createdErr != nil || !original.Time.Truncate(time.Second).Equal(created.Time.Truncate(time.Second)) || (targetOffset == "" && normalizeXMPOffset(original.RawOffset) != normalizeXMPOffset(created.RawOffset)) {
 			base.State = stateAmbiguous
 			base.Reason = "XMP 拍摄时间与 Photoshop DateCreated 缺失或不一致，需人工检查"
 			return base
@@ -568,12 +575,37 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 		base.Reason = err.Error()
 		return base
 	}
-	originalOffset, err := parseOffset(m.OffsetTimeOriginal)
-	if err != nil {
-		base.State = stateAmbiguous
-		base.Reason = err.Error()
+	if targetOffset != "" {
+		wallDelta := dtoClock.Time.Sub(createClock.Time)
+		if wallDelta%time.Minute != 0 || wallDelta > 14*time.Hour || wallDelta < -14*time.Hour {
+			base.State = stateAmbiguous
+			base.Reason = "拍摄与创建时间差不是合理的整分钟时区调整，需人工检查"
+			return base
+		}
+		matches := wallDelta == 0 && normalizeXMPOffset(m.OffsetTimeOriginal) == targetOffset && normalizeXMPOffset(m.OffsetTimeDigitized) == targetOffset
+		if isXMP(file) {
+			created, _ := parseExifDate(m.XMPDateCreated)
+			matches = matches && normalizeXMPOffset(created.RawOffset) == targetOffset
+		}
+		if matches {
+			// Retain the existing digest maintenance behavior for an otherwise
+			// consistent JPEG.
+			return analyzeMetadata(file, m)
+		}
+		if !hasLightroomOrRAWSource(m) {
+			base.State = stateAmbiguous
+			base.Reason = "没有找到 Lightroom/RAW 来源证据，拒绝自动修改"
+			return base
+		}
+		base.State = stateInitialResidue
+		base.Reason = "优先采用 GPS 坐标对应的拍摄地时区，保留拍摄钟面时间并同步创建时间与偏移"
+		base.TargetLocal = dtoPrecise.Local
+		base.SourceOffset = normalizeXMPOffset(m.OffsetTimeOriginal)
+		base.TargetOffset = targetOffset
+		base.ShiftMinutes = int(wallDelta / time.Minute)
 		return base
 	}
+	originalOffset, originalOffsetErr := parseOffset(m.OffsetTimeOriginal)
 	createOffset, err := parseOffset(m.OffsetTimeDigitized)
 	if err != nil {
 		base.State = stateAmbiguous
@@ -588,6 +620,15 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 		return base
 	}
 	deltaMinutes := int(wallDelta / time.Minute)
+	// Lightroom can drop the original UTC suffix after shifting capture time,
+	// while retaining an explicit UTC offset on CreateDate. Only accept this
+	// specific missing-offset case; an absent offset alone does not imply UTC.
+	missingUTCOriginal := strings.TrimSpace(m.OffsetTimeOriginal) == "" && createOffset == 0 && deltaMinutes != 0
+	if originalOffsetErr != nil && !missingUTCOriginal {
+		base.State = stateAmbiguous
+		base.Reason = originalOffsetErr.Error()
+		return base
+	}
 	digestMismatch := m.IPTCDigest != "" && m.CurrentIPTCDigest != "" && !strings.EqualFold(m.IPTCDigest, m.CurrentIPTCDigest)
 	hasMarker := strings.Contains(m.UserComment, auditPrefix)
 
@@ -596,8 +637,8 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 			base.State = stateMarkerMaintenance
 			base.Reason = "时间已一致，但本工具标记存在且 IPTCDigest 需要刷新"
 			base.TargetLocal = dtoPrecise.Local
-			base.SourceOffset = m.OffsetTimeOriginal
-			base.TargetOffset = m.OffsetTimeOriginal
+			base.SourceOffset = formatOffset(originalOffset)
+			base.TargetOffset = formatOffset(originalOffset)
 			return base
 		}
 		base.State = stateConsistent
@@ -624,6 +665,9 @@ func analyzeMetadata(file string, m metadata) analysisResult {
 		base.Reason = "拍摄时间已平移，但 OffsetTimeOriginal 仍与旧数字化时区相同"
 		if isXMP(file) {
 			base.Reason = "XMP 拍摄时间已平移，但三个时间字段仍残留相同旧时区；可独立修正，无需 RAW"
+		}
+		if missingUTCOriginal {
+			base.Reason = "拍摄时间已平移且拍摄时区缺失，原创建时间明确为 UTC+0；按两组时间差推断目标偏移"
 		}
 		base.TargetLocal = dtoPrecise.Local
 		base.SourceOffset = formatOffset(createOffset)

@@ -123,6 +123,11 @@ func TestXMPInference(t *testing.T) {
 		{"midnight", "2026:01:01 00:10:00+08:00", "2025:12:31 23:10:00+08:00", "2026:01:01 00:10:00+08:00", "+09:00", stateInitialResidue},
 		{"westward", "2025:10:01 05:39:15+08:00", "2025:10:01 12:39:15+08:00", "2025:10:01 05:39:15+08:00", "+01:00", stateInitialResidue},
 		{"utc", "2025:10:01 13:39:15Z", "2025:10:01 12:39:15Z", "2025:10:01 13:39:15Z", "+01:00", stateInitialResidue},
+		{"dropped UTC suffix", "2026:10:07 10:11:14.230", "2026:10:07 07:11:14.23Z", "2026:10:07 10:11:14.230", "+03:00", stateInitialResidue},
+		{"dropped numeric UTC offset", "2026:10:07 10:11:14.230", "2026:10:07 07:11:14.23+00:00", "2026:10:07 10:11:14.230", "+03:00", stateInitialResidue},
+		{"dropped UTC suffix westward", "2026:10:07 04:11:14.230", "2026:10:07 07:11:14.23Z", "2026:10:07 04:11:14.230", "-03:00", stateInitialResidue},
+		{"missing offsets on both dates", "2026:10:07 10:11:14.230", "2026:10:07 07:11:14.23", "2026:10:07 10:11:14.230", "", stateAmbiguous},
+		{"missing UTC suffix without shift", "2026:10:07 07:11:14.230", "2026:10:07 07:11:14.23Z", "2026:10:07 07:11:14.230", "", stateAmbiguous},
 		{"consistent", "2025:10:01 13:39:15+09:00", "2025:10:01 13:39:15+09:00", "2025:10:01 13:39:15+09:00", "", stateConsistent},
 		{"missing offset", "2025:10:01 13:39:15", "2025:10:01 12:39:15+08:00", "2025:10:01 13:39:15", "", stateAmbiguous},
 		{"different offsets", "2025:10:01 13:39:15+09:00", "2025:10:01 12:39:15+08:00", "2025:10:01 13:39:15+09:00", "", stateAmbiguous},
@@ -239,6 +244,79 @@ func TestPersistentRepairJPEGAndXMP(t *testing.T) {
 	}
 	if _, err := readMetadataWithRunner(session, sidecar); err != nil {
 		t.Fatalf("session after failure: %v", err)
+	}
+}
+
+func TestGPSUTCRepairIntegration(t *testing.T) {
+	tool, err := findExifTool()
+	if err != nil {
+		t.Skip("ExifTool is required for integration test")
+	}
+	dir := t.TempDir()
+	jpg := filepath.Join(dir, "photo.jpg")
+	f, err := os.Create(jpg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeErr := jpeg.Encode(f, image.NewRGBA(image.Rect(0, 0, 4, 4)), nil)
+	closeErr := f.Close()
+	if encodeErr != nil || closeErr != nil {
+		t.Fatalf("create JPEG: %v / %v", encodeErr, closeErr)
+	}
+	session, err := newExifToolSession(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	_, stderr, err := session.RunFiles(dir, []string{"photo.jpg"}, "-overwrite_original",
+		"-EXIF:DateTimeOriginal=2026:09:27 08:04:05", "-EXIF:CreateDate=2026:09:27 10:04:05",
+		"-EXIF:OffsetTimeOriginal=+08:00", "-EXIF:OffsetTimeDigitized=+08:00",
+		"-IPTC:DateCreated=2026:09:27", "-IPTC:TimeCreated=08:04:05+08:00",
+		"-IPTC:DigitalCreationDate=2026:09:27", "-IPTC:DigitalCreationTime=10:04:05+08:00",
+		"-GPS:GPSLatitude=64.1499", "-GPS:GPSLatitudeRef=N", "-GPS:GPSLongitude=21.9301", "-GPS:GPSLongitudeRef=W",
+		"-XMP-xmp:CreatorTool=Adobe Photoshop Lightroom Classic")
+	if err != nil {
+		t.Fatalf("%v: %s", err, stderr)
+	}
+	sidecar := filepath.Join(dir, "photo.xmp")
+	xmp := `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" exif:DateTimeOriginal="2026-09-27T08:04:05.440+08:00" xmp:CreateDate="2026-09-27T10:04:05.44+08:00" photoshop:DateCreated="2026-09-27T08:04:05.440+08:00" exif:GPSLatitude="64,8.994N" exif:GPSLongitude="21,55.806W" xmp:CreatorTool="Adobe Photoshop Lightroom Classic"/></rdf:RDF></x:xmpmeta>`
+	if err := os.WriteFile(sidecar, []byte(xmp), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{jpg, sidecar} {
+		m, err := readMetadataWithRunner(session, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := analyzePhotoMetadata(file, m)
+		if !r.Repairable() || r.TargetOffset != "+00:00" {
+			t.Fatalf("GPS must override legacy +06:00: %+v", r)
+		}
+		if err := repairFileWithRunner(session, &r, "20261015_120000", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if !isXMP(file) {
+			// A producer may serialize the same UTC offset as Z rather than
+			// +00:00. Read this form through ExifTool and exercise verification.
+			_, stderr, err := session.RunFiles(dir, []string{"photo.jpg"}, "-overwrite_original",
+				"-XMP-xmp:CreateDate="+r.TargetLocal+"Z", "-XMP-photoshop:DateCreated="+r.TargetLocal+"Z")
+			if err != nil {
+				t.Fatalf("write Z: %v: %s", err, stderr)
+			}
+		}
+		after, err := readMetadataWithRunner(session, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isXMP(file) && (!strings.HasSuffix(after.XMPCreateDate, "Z") || !strings.Contains(after.UserComment, "utc-preserved=no")) {
+			t.Fatalf("expected XMP Z and accurate UTC audit marker: %+v", after)
+		}
+		if err := verifyRepair(r, after, buildAuditMarker(r, time.Now())); err != nil {
+			t.Fatal(err)
+		}
+		if again := analyzePhotoMetadata(file, after); again.State != stateConsistent {
+			t.Fatalf("second GPS scan: %+v", again)
+		}
 	}
 }
 
